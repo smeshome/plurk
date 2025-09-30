@@ -1,0 +1,3403 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plurk 風格回應牆 - Firebase 版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+    <!-- 引入 QR Code 生成函式庫 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        /* 自訂仿 Plurk 風格 (與原版相同) */
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #eef2f5;
+        }
+        .font-theme-title {
+            font-family: 'Noto Sans TC', sans-serif;
+            font-weight: 700;
+        }
+        #main-title-input {
+            background: transparent;
+            border: 2px dashed transparent;
+            text-align: center;
+            outline: none;
+            transition: border-color 0.2s;
+            color: #333;
+        }
+        #main-title-input:focus {
+            border-color: #ff5a00;
+        }
+        #wall-container {
+            display: flex;
+            overflow-x: auto;
+            padding: 1.5rem;
+            gap: 1.5rem;
+            min-height: calc(100vh - 180px);
+            align-items: flex-start;
+            background-image: url('https://images.plurk.com/6rYRzJbEIqWyR8wei5we.jpg');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            transition: background-image 0.5s ease-in-out;
+        }
+        .section-column {
+            background-color: #ffffff;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            width: 380px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            max-height: 75vh;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .section-column:nth-child(odd) { margin-top: 0; align-self: flex-start; }
+        .section-column:nth-child(even) { margin-top: 80px; align-self: flex-start; }
+        .section-column:nth-child(3n) { margin-top: 40px; }
+        .section-column:nth-child(4n) { margin-top: 120px; }
+        .section-header {
+            padding: 1rem;
+            border-bottom: 1px solid #e5e5e5;
+            display: flex;
+            gap: 0.75rem;
+            cursor: pointer;
+        }
+        .section-title-input {
+            width: 100%;
+            font-size: 1rem;
+            background: transparent;
+            border: none;
+            outline: none;
+            line-height: 1.5;
+            resize: none;
+            padding: 0;
+            overflow-y: hidden;
+        }
+        .section-title-input:focus { box-shadow: none; }
+        .section-posts {
+            padding: 0;
+            flex-grow: 1;
+            overflow-y: auto;
+            background-color: #f5f8fa;
+            transition: all 0.3s ease;
+        }
+        .section-column.collapsed .section-posts,
+        .section-column.collapsed .section-footer {
+            display: none;
+        }
+        .toggle-btn {
+            cursor: pointer;
+            user-select: none;
+            transition: transform 0.3s ease;
+        }
+        .section-column.collapsed .toggle-btn { transform: rotate(-90deg); }
+        .post-card {
+            border: none;
+            box-shadow: none;
+            margin-bottom: 0;
+            border-top: 1px solid #e5e5e5;
+            transition: background-color 0.2s ease-in-out;
+            display: flex;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            background-color: #fff;
+        }
+        .post-card:first-child { border-top: none; }
+        .post-card:hover { background-color: #fafcff; transform: none; box-shadow: none; }
+        .preserve-lines { white-space: pre-wrap; }
+        .like-btn { background: none; border: none; cursor: pointer; font-size: 1.2rem; transition: transform 0.2s ease; padding: 0; }
+        .like-btn:hover { transform: scale(1.2); }
+        .like-btn.liked { color: #ef4444; }
+        .modal-backdrop { background-color: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px); }
+        .modal-content { border: 1px solid #ccc; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+        .theme-button {
+            border: 1px solid #ccc;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            transition: all 0.15s ease-in-out;
+            font-weight: bold;
+        }
+        .theme-button:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .theme-button:active { transform: translateY(0); box-shadow: inset 0 1px 2px rgba(0,0,0,0.1); }
+        .plurk-avatar { width: 48px; height: 48px; border-radius: 5px; background-color: #ff5a00; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 1.5rem; }
+        .reply-avatar { width: 36px; height: 36px; border-radius: 5px; background-color: #6b7280; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; }
+        .plurk-qualifier { background-color: #ff5a00; color: white; padding: 2px 8px; border-radius: 12px; font-weight: bold; font-size: 0.875rem; display: inline-block; }
+        
+        /* Padlet 風格樣式 */
+        body.padlet-style {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        /* 當wall-container有背景圖時，覆蓋body的背景 */
+        body.padlet-style #wall-container[style*="background-image"] {
+            background-color: rgba(255,255,255,0.1) !important;
+        }
+        
+        body.padlet-style #wall-container {
+            background-color: transparent;
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            display: flex;
+            flex-direction: row;
+            gap: 20px;
+            padding: 2rem;
+            overflow-x: auto;
+            overflow-y: hidden;
+            align-items: flex-start;
+            min-height: calc(100vh - 180px);
+            transition: background-image 0.5s ease-in-out;
+        }
+        
+        body.padlet-style .section-column {
+            background: transparent;
+            border-radius: 12px;
+            border: none;
+            box-shadow: none;
+            width: 320px;
+            min-width: 320px;
+            max-width: 320px;
+            max-height: calc(100vh - 200px);
+            margin-top: 0 !important;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            flex-shrink: 0;
+        }
+        
+        body.padlet-style .section-column:hover {
+            transform: none;
+            box-shadow: none;
+        }
+        
+        body.padlet-style .section-header {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border-radius: 12px 12px 0 0;
+            padding: 1.5rem;
+            border-bottom: none;
+        }
+        
+        body.padlet-style .section-title-input {
+            color: white;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+        
+        body.padlet-style .section-title-input::placeholder {
+            color: rgba(255,255,255,0.8);
+        }
+        
+        body.padlet-style .section-posts {
+            background: transparent;
+            padding: 1rem;
+            border-radius: 0 0 12px 12px;
+        }
+        
+        body.padlet-style .post-card {
+            background: rgba(248, 249, 255, 0.9);
+            backdrop-filter: blur(5px);
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            padding: 1.25rem;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: block;
+        }
+        
+        body.padlet-style .post-card:first-child {
+            border-top: 1px solid #e2e8f0;
+        }
+        
+        body.padlet-style .post-card:hover {
+            background: rgba(255, 255, 255, 0.95);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+        }
+        
+        body.padlet-style .post-card:last-child {
+            margin-bottom: 16px;
+        }
+        
+        body.padlet-style .toggle-btn {
+            color: white;
+        }
+        
+        body.padlet-style #main-title-input {
+            color: white;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        body.padlet-style #main-title-input:focus {
+            border-color: rgba(255,255,255,0.5);
+        }
+        
+        /* Padlet風格下的新增區段樣式 */
+        body.padlet-style .new-plurk-section {
+            background: rgba(255,255,255,0.9);
+            backdrop-filter: blur(10px);
+            border: 2px dashed #4facfe;
+            border-radius: 12px;
+            width: 320px;
+            min-width: 320px;
+            max-width: 320px;
+            flex-shrink: 0;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            transition: all 0.2s ease;
+        }
+        
+        body.padlet-style .new-plurk-section:hover {
+            background: rgba(255,255,255,1);
+            border-color: #00f2fe;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        
+        body.padlet-style .new-plurk-section .add-section-btn {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+        
+        body.padlet-style .new-plurk-section .add-section-btn:hover {
+            transform: scale(1.1);
+        }
+        
+        /* Padlet風格下的新增回應按鈕樣式 */
+        body.padlet-style .section-add-post {
+            padding: 1rem;
+            border-bottom: none;
+            background: transparent;
+        }
+        
+        body.padlet-style .section-add-post .add-post-btn {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            width: 100%;
+            transition: all 0.2s ease;
+        }
+        
+        body.padlet-style .section-add-post .add-post-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(79, 172, 254, 0.3);
+        }
+        
+        body.padlet-style .section-footer {
+            display: none;
+        }
+        
+        /* Padlet風格下的頁尾文字 */
+        body.padlet-style footer {
+            color: white !important;
+        }
+        
+        body.padlet-style footer a {
+            color: #4facfe !important;
+        }
+        
+        body.padlet-style footer a:hover {
+            color: #00f2fe !important;
+        }
+        
+        /* Padlet風格下隱藏plurk相關元素 */
+        body.padlet-style .toggle-btn {
+            display: none;
+        }
+        
+        body.padlet-style .plurk-avatar {
+            display: none;
+        }
+        
+        body.padlet-style .plurk-qualifier {
+            display: none;
+        }
+        
+        body.padlet-style .section-header {
+            cursor: default;
+            padding: 1.5rem 1.5rem 1rem 1.5rem;
+        }
+        
+        /* 隱藏老師文字 */
+        body.padlet-style .section-header .font-bold.text-orange-600 {
+            display: none;
+        }
+        
+        /* 重新佈局按鈕區域 */
+        body.padlet-style .section-header .flex.items-center.mb-2 {
+            justify-content: flex-end;
+            margin-bottom: 0.5rem;
+        }
+        
+        /* 展開、圖片切換和刪除按鈕樣式調整 */
+        body.padlet-style .expand-responses-btn,
+        body.padlet-style .image-toggle-btn,
+        body.padlet-style .delete-section-btn {
+            color: rgba(255,255,255,0.8) !important;
+            background: rgba(255,255,255,0.1);
+            border-radius: 6px;
+            transition: all 0.2s ease;
+        }
+        
+        body.padlet-style .expand-responses-btn:hover,
+        body.padlet-style .image-toggle-btn:hover,
+        body.padlet-style .delete-section-btn:hover {
+            background: rgba(255,255,255,0.2);
+            color: white !important;
+        }
+        
+        /* Plurk風格下隱藏中間的新增回應按鈕，只保留底部按鈕 */
+        body:not(.padlet-style) .section-add-post {
+            display: none;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-6">
+
+    <!-- 同步狀態提示 -->
+    <div id="sync-status" class="fixed bottom-4 right-4 bg-gray-800 text-white text-sm font-bold py-2 px-4 rounded-lg shadow-lg z-50 opacity-0 transition-opacity duration-300 pointer-events-none">
+        資料同步中...
+    </div>
+
+    <!-- 右上角按鈕區 -->
+    <div class="fixed top-4 right-4 z-50 flex gap-2">
+        <button id="new-wall-btn" class="bg-white border border-gray-300 rounded-full w-10 h-10 text-xl flex items-center justify-center theme-button" title="新回應牆">🆕</button>
+        <button id="style-toggle-btn" class="bg-white border border-gray-300 rounded-full w-10 h-10 text-xl flex items-center justify-center theme-button" title="切換Padlet風格">🎛️</button>
+        <button id="save-btn" class="bg-white border border-gray-300 rounded-full w-10 h-10 text-xl flex items-center justify-center theme-button" title="雲端存檔">💾</button>
+        <button id="open-btn" class="bg-white border border-gray-300 rounded-full w-10 h-10 text-xl flex items-center justify-center theme-button" title="開啟舊檔">📂</button>
+        <button id="export-btn" class="bg-white border border-gray-300 rounded-full w-10 h-10 text-xl flex items-center justify-center theme-button" title="匯出資料">📤</button>
+        <button id="import-btn" class="bg-white border border-gray-300 rounded-full w-10 h-10 text-xl flex items-center justify-center theme-button" title="匯入資料">📥</button>
+        <button id="download-html-btn" class="bg-white border border-gray-300 rounded-full w-10 h-10 text-xl flex items-center justify-center theme-button" title="下載HTML報告">📋</button>
+        <button id="setting-bg-btn" class="bg-white border border-gray-300 rounded-full w-10 h-10 text-xl flex items-center justify-center theme-button" title="設定河道背景">🎨</button>
+        <button id="student-mode-btn" class="bg-white border border-gray-300 rounded-full w-10 h-10 text-xl flex items-center justify-center theme-button" title="學生模式">🧑‍🎓</button>
+        <button id="help-btn" class="bg-white border border-gray-300 rounded-full w-10 h-10 text-xl flex items-center justify-center theme-button" title="Firebase 設定說明">❓</button>
+    </div>
+    
+    <!-- 頁面標題 -->
+    <header class="text-center mb-4 flex-shrink-0">
+        <input id="main-title-input" type="text" class="font-theme-title text-4xl sm:text-5xl w-full">
+
+    </header>
+
+    <!-- 牆面容器 (河道) -->
+    <main id="wall-container"></main>
+    
+    <!-- 新增噗文輸入區 -->
+    <div id="new-plurk-section" class="p-4 flex-shrink-0 max-w-2xl mx-auto">
+        <div class="flex items-center gap-3 mb-3">
+            <input id="new-plurk-input" type="text" placeholder="分享今天發生了什麼事..." class="flex-grow px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent">
+            <button id="add-section-btn" class="theme-button bg-[#ff5a00] text-white py-2 px-6 rounded-lg font-bold whitespace-nowrap">發新噗</button>
+        </div>
+        <div class="flex items-center gap-3">
+            <label class="flex items-center cursor-pointer">
+                <input type="radio" name="new-plurk-type" value="text" class="mr-2" checked> 純文字
+            </label>
+            <label class="flex items-center cursor-pointer">
+                <input type="radio" name="new-plurk-type" value="text_image" class="mr-2"> 文字+圖片
+            </label>
+            <div id="new-plurk-upload" class="hidden">
+                <input type="file" id="new-plurk-file" class="text-sm" accept="image/*">
+            </div>
+        </div>
+    </div>
+
+    <!-- 頁尾 -->
+    <footer class="flex-shrink-0 text-center text-sm text-gray-500 font-bold">
+        Made by <a href="https://kentxchang.blogspot.tw/" target="_blank" rel="noopener noreferrer" class="text-orange-600 hover:underline">阿剛老師</a> - Firebase 版
+    </footer>
+
+    <!-- 回應模態視窗 -->
+    <div id="post-modal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+        <div class="modal-content bg-white w-full max-w-lg rounded-lg p-6 relative">
+            <button id="close-modal-btn" class="absolute top-2 right-2 bg-gray-200 text-gray-700 w-8 h-8 rounded-full font-bold text-lg">&times;</button>
+            <form id="post-form">
+                <input type="hidden" id="post-id">
+                <input type="hidden" id="section-id">
+                <h2 id="modal-title" class="font-theme-title text-2xl text-center mb-4 text-gray-800">新增一則回應</h2>
+                <div>
+                    <label for="post-title" class="block font-bold mb-1">您的暱稱</label>
+                    <input type="text" id="post-title" class="w-full p-2 border border-gray-300 rounded-md" required>
+                </div>
+                <div class="mt-4">
+                    <label for="post-content" class="block font-bold mb-1">回應內容</label>
+                    <textarea id="post-content" rows="3" class="w-full p-2 border border-gray-300 rounded-md"></textarea>
+                </div>
+                <div class="mt-4">
+                    <label class="block font-bold mb-2">類型</label>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        <label class="flex items-center"><input type="radio" name="post-type" value="text" class="mr-2" checked> 文字</label>
+                        <label class="flex items-center"><input type="radio" name="post-type" value="image_url" class="mr-2"> 圖片網址</label>
+                        <label class="flex items-center"><input type="radio" name="post-type" value="image_upload" class="mr-2"> 上傳圖片</label>
+                        <label class="flex items-center"><input type="radio" name="post-type" value="youtube" class="mr-2"> YouTube</label>
+                        <label class="flex items-center"><input type="radio" name="post-type" value="link" class="mr-2"> 一般網址</label>
+                        <label class="flex items-center"><input type="radio" name="post-type" value="drawing" class="mr-2"> 塗鴉回應</label>
+                    </div>
+                </div>
+                <div id="url-input-container" class="mt-4 hidden">
+                    <label for="post-url" id="url-label" class="block font-bold mb-1">網址</label>
+                    <input type="url" id="post-url" class="w-full p-2 border border-gray-300 rounded-md" placeholder="請貼上完整的網址...">
+                </div>
+                <div id="upload-container" class="mt-4 hidden">
+                    <label class="block font-bold mb-1">上傳 (自動壓縮)</label>
+                    <div id="drop-zone" class="border-2 border-dashed border-gray-300 p-4 text-center cursor-pointer rounded-md">
+                        <p>拖曳圖片到此，或點擊選擇檔案</p>
+                        <input type="file" id="image-upload" class="hidden" accept="image/*">
+                        <p id="upload-filename" class="text-sm text-gray-600 mt-1"></p>
+                    </div>
+                </div>
+                <div class="mt-6 text-center">
+                    <button type="submit" id="submit-btn" class="theme-button bg-blue-500 hover:bg-blue-600 text-white py-2 px-8 rounded-lg font-bold">送出回應</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- 圖片放大檢視器 -->
+    <div id="image-viewer" class="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center p-4 hidden">
+        <div id="image-container" class="relative overflow-hidden w-full h-full flex items-center justify-center" style="touch-action: none;">
+            <img src="" alt="放大圖片" class="image-content rounded-lg shadow-2xl transition-transform duration-200 ease-out" style="transform-origin: center center;">
+            <button id="close-image-viewer-btn" class="fixed top-4 right-4 bg-black bg-opacity-50 hover:bg-opacity-70 text-white w-12 h-12 rounded-full text-2xl font-bold transition-all duration-200 flex items-center justify-center z-10" title="關閉圖片">❌</button>
+        </div>
+    </div>
+
+    <!-- 自訂確認視窗 -->
+    <div id="confirm-modal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+        <div class="modal-content bg-white w-full max-w-sm rounded-lg p-6 relative">
+            <h3 id="confirm-title" class="text-lg font-bold text-gray-900 mb-4">確認操作</h3>
+            <p id="confirm-message" class="text-gray-700 mb-6">您確定要執行此操作嗎？</p>
+            <div class="flex justify-end gap-3">
+                <button id="confirm-cancel-btn" class="theme-button bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 px-4 rounded-lg">取消</button>
+                <button id="confirm-ok-btn" class="theme-button bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded-lg">確定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 學生模式視窗 (美化版) -->
+    <div id="student-mode-modal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+        <div class="modal-content bg-white w-full max-w-md rounded-lg shadow-xl overflow-hidden">
+            <div class="bg-orange-500 text-white p-4 flex justify-between items-center">
+                <h2 class="font-theme-title text-2xl">學生模式網址</h2>
+                <button id="close-student-modal-btn" class="text-2xl font-bold leading-none hover:text-orange-200">&times;</button>
+            </div>
+            <div class="p-6 flex flex-col items-center gap-4">
+                <p class="text-center text-gray-600">請掃描 QR Code 或複製以下網址，分享給學生。</p>
+                <div id="qrcode-container" class="p-2 bg-white border rounded-lg"></div>
+                <input type="text" id="student-url-input" class="w-full p-2 border border-gray-300 rounded-md bg-gray-100 text-center" readonly>
+                <div class="flex justify-center gap-4 mt-2 w-full">
+                    <button id="copy-student-url-btn" class="theme-button bg-blue-500 hover:bg-blue-600 text-white py-2 px-6 rounded-lg flex-1">複製網址</button>
+                    <button id="open-student-url-btn" class="theme-button bg-green-500 hover:bg-green-600 text-white py-2 px-6 rounded-lg flex-1">開啟分頁</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 背景設定視窗 -->
+    <div id="setting-bg-modal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+        <div class="modal-content bg-white w-full max-w-lg rounded-lg p-6 relative">
+            <button id="close-bg-modal-btn" class="absolute top-2 right-2 bg-gray-200 text-gray-700 w-8 h-8 rounded-full font-bold text-lg">&times;</button>
+            <h2 class="font-theme-title text-2xl text-center mb-4 text-gray-800">設定河道背景</h2>
+            <div id="bg-upload-container" class="mt-4">
+                <label class="block font-bold mb-1">上傳新背景 (自動壓縮)</label>
+                <div id="bg-drop-zone" class="border-2 border-dashed border-gray-300 p-6 text-center cursor-pointer rounded-md">
+                    <p>拖曳圖片到此，或點擊選擇檔案</p>
+                    <input type="file" id="bg-image-upload" class="hidden" accept="image/*">
+                    <p id="bg-upload-filename" class="text-sm text-gray-600 mt-1"></p>
+                </div>
+            </div>
+            <div class="mt-6 text-center flex gap-4 justify-center">
+                <button id="submit-bg-btn" class="theme-button bg-orange-500 hover:bg-orange-600 text-white py-2 px-8 rounded-lg font-bold">設定背景</button>
+                <button id="restore-bg-btn" class="theme-button bg-gray-500 hover:bg-gray-600 text-white py-2 px-6 rounded-lg font-bold">恢復預設</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Firebase 設定說明視窗 -->
+    <div id="help-modal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+        <div class="modal-content bg-white w-full max-w-4xl rounded-lg p-6 relative h-[90vh] flex flex-col">
+            <button id="close-help-modal-btn" class="absolute top-2 right-2 bg-gray-200 text-gray-700 w-8 h-8 rounded-full font-bold text-lg">&times;</button>
+            <h2 class="font-theme-title text-2xl text-center mb-4 text-gray-800 flex-shrink-0">雲端同步設定說明 (Firebase)</h2>
+            <div class="overflow-y-auto pr-2 text-gray-800">
+                <p class="mb-4">請依照以下步驟設定，將您的回應牆資料儲存到您自己的 Firebase 專案，實現跨裝置即時同步。</p>
+                
+                <h3 class="font-bold text-lg mb-2 mt-4">步驟一：建立 Firebase 專案</h3>
+                <ol class="list-decimal list-inside space-y-2 mb-4 pl-4">
+                    <li>前往 <a href="https://console.firebase.google.com/" target="_blank" class="text-blue-600 hover:underline">Firebase 控制台</a>。</li>
+                    <li>點擊「建立專案」，並為您的專案命名（例如：my-plurk-wall）。</li>
+                    <li>依照畫面指示完成專案建立，您可以選擇性地啟用 Google Analytics。</li>
+                </ol>
+
+                <h3 class="font-bold text-lg mb-2 mt-4">步驟二：設定 Firestore 資料庫</h3>
+                <ol class="list-decimal list-inside space-y-2 mb-4 pl-4">
+                    <li>在左側選單中，點擊「建構」 > 「Authentication (認證)」: 點擊「開始使用」 -> 選擇「匿名」 -> 啟用並儲存。</li>
+                    <li>在左側選單中，點擊「建構」 > 「Firestore Database」。</li>
+                    <li>點擊「建立資料庫」。</li>
+                    <li>選擇「以**測試模式**開始」。這會讓資料庫在初期可以被公開存取，方便我們測試。<strong>（重要：測試模式的存取權限會在 30 天後到期）</strong></li>
+                    <li>選擇離您最近的 Cloud Firestore 位置，然後點擊「啟用」。</li>
+                </ol>
+                
+                <div class="p-4 bg-red-100 border-l-4 border-red-500 text-red-700 my-4 rounded-md">
+                    <p class="font-bold">圖片上傳注意</p>
+                    <p class="mt-1">本程式會將圖片壓縮後以文字形式存入資料庫，以符合免費方案。但 Firestore 對單筆資料有 1MB 的大小限制，若您上傳的原始圖片檔案過大（例如超過 5MB 的照片），仍可能儲存失敗。若遇到此狀況，請嘗試使用尺寸較小的圖片。</p>
+                </div>
+
+                <h3 class="font-bold text-lg mb-2 mt-4">步驟三：設定永久存取規則 (重要！)</h3>
+                <p class="mb-2">測試模式會在 30 天後失效，為了讓回應牆永久可用，請手動更新安全規則：</p>
+                <ol class="list-decimal list-inside space-y-2 mb-4 pl-4">
+                    <li>
+                        <strong>Firestore 規則</strong>:
+                        <ul class="list-disc list-inside ml-4 mt-1">
+                            <li>回到「Firestore Database」分頁，點擊上方的「規則」分頁。</li>
+                            <li>將編輯器中的內容全部取代為以下程式碼，然後點擊「發布」。</li>
+                        </ul>
+                        <pre class="bg-gray-100 p-3 rounded-md text-sm overflow-x-auto my-2"><code>rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}</code></pre>
+                    </li>
+                </ol>
+                 <div class="p-4 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 my-4 rounded-md">
+                    <p class="font-bold">安全性警告</p>
+                    <p class="mt-1">此規則允許任何人讀取和寫入您的資料庫。這對於此公開回應牆是必要的，但請勿將任何私人或敏感資料存放在此專案中。</p>
+                </div>
+
+                <h3 class="font-bold text-lg mb-2 mt-6">步驟四：取得 Firebase 設定碼並貼回本網頁</h3>
+                <ol class="list-decimal list-inside space-y-2 mb-4 pl-4">
+                    <li>點擊左上角的專案名稱旁邊的齒輪圖示，選擇「專案設定」。</li>
+                    <li>在「您的應用程式」區塊，點擊「</>」 (網頁) 圖示來註冊您的網頁應用程式。</li>
+                    <li>為您的應用程式取一個暱稱，然後點擊「註冊應用程式」。</li>
+                    <li>註冊後，Firebase 會顯示一個 `firebaseConfig` 物件。<strong>請點擊複製圖示，將這段完整的程式碼複製下來。</strong></li>
+                    <li>回到這個回應牆網頁，用文字編輯器打開此 HTML 檔案。</li>
+                    <li>在程式碼中找到 <code>&lt;script type="module"&gt;</code> 區塊。</li>
+                    <li>找到標示為「請將您從 Firebase 複製的設定貼在這裡」的區塊，用您剛剛複製的 `firebaseConfig` 物件，取代掉原本的範例內容。</li>
+                </ol>
+                <pre class="bg-gray-100 p-3 rounded-md text-sm overflow-x-auto my-2"><code>
+// ▼▼▼▼▼▼▼▼▼ 請將您從 Firebase 複製的設定貼在這裡 ▼▼▼▼▼▼▼▼▼
+const firebaseConfig = {
+  apiKey: "AIzaSyAJY0S4J7kfdrcwSLplDguvwcjNKSpWNwY",
+  authDomain: "classtools-5987d.firebaseapp.com",
+  projectId: "classtools-5987d",
+  storageBucket: "classtools-5987d.firebasestorage.app",
+  messagingSenderId: "569720834005",
+  appId: "1:569720834005:web:deb514eb5f9e2344821f5c"
+};
+// ▲▲▲▲▲▲▲▲▲ 請將您從 Firebase 複製的設定貼在這裡 ▲▲▲▲▲▲▲▲▲
+                </code></pre>
+                <p class="mt-2 p-3 bg-green-100 border-l-4 border-green-500 text-green-700 rounded-md">
+                    <strong>完成！</strong> 儲存 HTML 檔案後，重新用瀏覽器打開它。現在所有的資料都會透過您設定的 Firebase 專案進行即時同步了！
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新增：自訂訊息視窗 -->
+    <div id="alert-modal" class="modal-backdrop fixed inset-0 z-[60] flex items-center justify-center p-4 hidden">
+        <div class="modal-content bg-white w-full max-w-sm rounded-lg p-6 relative">
+            <h3 id="alert-title" class="text-lg font-bold text-gray-900 mb-4">系統訊息</h3>
+            <p id="alert-message" class="text-gray-700 mb-6 whitespace-pre-wrap">訊息內容</p>
+            <div class="flex justify-end gap-3">
+                <button id="alert-ok-btn" class="theme-button bg-blue-500 hover:bg-blue-600 text-white py-2 px-6 rounded-lg">確定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新增：開啟舊檔視窗 -->
+    <div id="open-modal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+        <div class="modal-content bg-white w-full max-w-2xl rounded-lg p-6 relative h-[70vh] flex flex-col">
+            <button id="close-open-modal-btn" class="absolute top-2 right-2 bg-gray-200 text-gray-700 w-8 h-8 rounded-full font-bold text-lg">&times;</button>
+            <h2 class="font-theme-title text-2xl text-center mb-4 text-gray-800 flex-shrink-0">開啟舊檔</h2>
+            <div id="archive-list-container" class="overflow-y-auto pr-2 text-gray-800 flex-grow">
+                <!-- 存檔列表將會動態插入此處 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 塗鴉畫板視窗 -->
+    <div id="drawing-modal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white w-[95vw] h-[95vh] rounded-lg p-4 relative flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="font-theme-title text-2xl text-gray-800">塗鴉回應</h2>
+                <button id="close-drawing-btn" class="bg-gray-200 text-gray-700 w-10 h-10 rounded-full font-bold text-lg">&times;</button>
+            </div>
+            
+            <div class="flex justify-between items-center gap-4 mb-4">
+                <!-- 工具列 -->
+                <div class="flex flex-wrap gap-2 items-center">
+                    <button id="brush-tool" class="tool-btn bg-blue-500 text-white px-3 py-1 rounded font-bold">畫筆</button>
+                    <button id="eraser-tool" class="tool-btn bg-gray-500 text-white px-3 py-1 rounded">擦布</button>
+                    
+                    <div class="flex items-center gap-2 ml-4">
+                        <label class="font-bold">粗細:</label>
+                        <input type="range" id="brush-size" min="1" max="20" value="5" class="w-20">
+                        <span id="brush-size-display" class="text-sm">5</span>
+                    </div>
+                    
+                    <div class="flex gap-1 ml-4">
+                        <button class="color-btn w-8 h-8 rounded border-2 border-gray-300" data-color="#FF0000" style="background-color: #FF0000" title="紅色"></button>
+                        <button class="color-btn w-8 h-8 rounded border-2 border-gray-300" data-color="#0000FF" style="background-color: #0000FF" title="藍色"></button>
+                        <button class="color-btn w-8 h-8 rounded border-2 border-gray-300" data-color="#00FF00" style="background-color: #00FF00" title="綠色"></button>
+                        <button class="color-btn w-8 h-8 rounded border-2 border-gray-300" data-color="#FFFF00" style="background-color: #FFFF00" title="黃色"></button>
+                        <button class="color-btn w-8 h-8 rounded border-2 border-gray-300 border-black" data-color="#FFFFFF" style="background-color: #FFFFFF" title="白色"></button>
+                        <button class="color-btn w-8 h-8 rounded border-2 border-gray-300" data-color="#000000" style="background-color: #000000" title="黑色"></button>
+                    </div>
+                    
+                    <div class="flex gap-2 ml-4">
+                        <button id="upload-bg-btn" class="tool-btn bg-green-500 text-white px-3 py-1 rounded">上傳背景</button>
+                        <button id="clear-canvas-btn" class="tool-btn bg-red-500 text-white px-3 py-1 rounded">清空</button>
+                    </div>
+                </div>
+                <button id="save-drawing-btn" class="theme-button bg-blue-500 text-white py-2 px-6 rounded-lg font-bold">儲存塗鴉</button>
+            </div>
+            
+            <div class="flex-grow relative border border-gray-300 rounded overflow-hidden">
+                <canvas id="drawing-bg-canvas" class="absolute inset-0 w-full h-full"></canvas>
+                <canvas id="drawing-canvas" class="absolute inset-0 w-full h-full" style="touch-action: none;"></canvas>
+            </div>
+            
+            <input type="file" id="drawing-bg-upload" class="hidden" accept="image/*">
+        </div>
+    </div>
+
+    <!-- 新增：匯入檔案視窗 -->
+    <div id="import-modal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+        <div class="modal-content bg-white w-full max-w-md rounded-lg p-6 relative">
+            <button id="close-import-modal-btn" class="absolute top-2 right-2 bg-gray-200 text-gray-700 w-8 h-8 rounded-full font-bold text-lg">&times;</button>
+            <h2 class="font-theme-title text-2xl text-center mb-4 text-gray-800">匯入資料</h2>
+            <div id="import-drop-zone" class="border-2 border-dashed border-gray-300 p-6 text-center cursor-pointer rounded-md mb-4">
+                <p>拖曳檔案到此，或點擊選擇檔案</p>
+                <p class="text-sm text-gray-500 mt-2">支援 JSON 格式</p>
+                <input type="file" id="import-file-input" class="hidden" accept=".json">
+            </div>
+            <div class="text-center text-gray-500">
+                <p>選擇檔案後將自動進入匯入確認流程</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 展開回應視窗 -->
+    <div id="responses-modal" class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white w-[80vw] h-[90vh] rounded-lg p-6 relative flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h2 id="responses-modal-title" class="font-theme-title text-2xl text-gray-800">所有回應</h2>
+                <button id="close-responses-btn" class="bg-gray-200 text-gray-700 w-10 h-10 rounded-full font-bold text-lg">&times;</button>
+            </div>
+            
+            <!-- 回應內容區域 -->
+            <div class="flex-grow overflow-y-auto">
+                <div id="responses-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- 回應列表將動態插入此處 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        // 匯入 Firebase 模組
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+        import { 
+            getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, 
+            query, orderBy, where, onSnapshot, serverTimestamp, increment, writeBatch
+        } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        
+        // ===================================================================================
+        // ==  Firebase 設定
+        // ===================================================================================
+        // vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+        // ▼▼▼▼▼▼▼▼▼ 中文備註：請將您從 Firebase 專案設定中複製的 firebaseConfig 物件，完整貼在下方取代原有的內容。 ▼▼▼▼▼▼▼▼▼
+        const firebaseConfig = {
+    apiKey: "AIzaSyAJY0S4J7kfdrcwSLplDguvwcjNKSpWNwY",
+  authDomain: "classtools-5987d.firebaseapp.com",
+  projectId: "classtools-5987d",
+  storageBucket: "classtools-5987d.firebasestorage.app",
+  messagingSenderId: "569720834005",
+  appId: "1:569720834005:web:deb514eb5f9e2344821f5c"
+        };
+        // ▲▲▲▲▲▲▲▲▲ 中文備註：請將您從 Firebase 專案設定中複製的 firebaseConfig 物件，完整貼在上方取代原有的內容。 ▲▲▲▲▲▲▲▲▲
+        // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        // ===================================================================================
+
+        // DOM 元素
+        const mainTitleInput = document.getElementById('main-title-input');
+        const newPlurkSection = document.getElementById('new-plurk-section');
+        const newPlurkInput = document.getElementById('new-plurk-input');
+        const addSectionBtn = document.getElementById('add-section-btn');
+        const wallContainer = document.getElementById('wall-container');
+        const postModal = document.getElementById('post-modal');
+        const postForm = document.getElementById('post-form');
+        const closeModalBtn = document.getElementById('close-modal-btn');
+        const submitBtn = document.getElementById('submit-btn');
+        const helpBtn = document.getElementById('help-btn');
+        const studentModeBtn = document.getElementById('student-mode-btn');
+        const settingBgBtn = document.getElementById('setting-bg-btn');
+        const helpModal = document.getElementById('help-modal');
+        const closeHelpModalBtn = document.getElementById('close-help-modal-btn');
+        const studentModeModal = document.getElementById('student-mode-modal');
+        const closeStudentModalBtn = document.getElementById('close-student-modal-btn');
+        const studentUrlInput = document.getElementById('student-url-input');
+        const copyStudentUrlBtn = document.getElementById('copy-student-url-btn');
+        const openStudentUrlBtn = document.getElementById('open-student-url-btn');
+        const settingBgModal = document.getElementById('setting-bg-modal');
+        const closeBgModalBtn = document.getElementById('close-bg-modal-btn');
+        const bgDropZone = document.getElementById('bg-drop-zone');
+        const bgImageUpload = document.getElementById('bg-image-upload');
+        const submitBgBtn = document.getElementById('submit-bg-btn');
+        const restoreBgBtn = document.getElementById('restore-bg-btn');
+        const imageViewer = document.getElementById('image-viewer');
+        const dropZone = document.getElementById('drop-zone');
+        const imageUpload = document.getElementById('image-upload');
+        const syncStatus = document.getElementById('sync-status');
+        const confirmModal = document.getElementById('confirm-modal');
+        const confirmMsg = document.getElementById('confirm-message');
+        const confirmOkBtn = document.getElementById('confirm-ok-btn');
+        const confirmCancelBtn = document.getElementById('confirm-cancel-btn');
+        const alertModal = document.getElementById('alert-modal');
+        const alertTitle = document.getElementById('alert-title');
+        const alertMessage = document.getElementById('alert-message');
+        const alertOkBtn = document.getElementById('alert-ok-btn');
+        const newWallBtn = document.getElementById('new-wall-btn');
+        const styleToggleBtn = document.getElementById('style-toggle-btn');
+        const saveBtn = document.getElementById('save-btn');
+        const openBtn = document.getElementById('open-btn');
+        const exportBtn = document.getElementById('export-btn');
+        const importBtn = document.getElementById('import-btn');
+        const downloadHtmlBtn = document.getElementById('download-html-btn');
+        const openModalEl = document.getElementById('open-modal');
+        const closeOpenModalBtn = document.getElementById('close-open-modal-btn');
+        const archiveListContainer = document.getElementById('archive-list-container');
+        const importModal = document.getElementById('import-modal');
+        const closeImportModalBtn = document.getElementById('close-import-modal-btn');
+        const importDropZone = document.getElementById('import-drop-zone');
+        const importFileInput = document.getElementById('import-file-input');
+        
+        // 塗鴉相關元素
+        const drawingModal = document.getElementById('drawing-modal');
+        const closeDrawingBtn = document.getElementById('close-drawing-btn');
+        const drawingCanvas = document.getElementById('drawing-canvas');
+        const drawingBgCanvas = document.getElementById('drawing-bg-canvas');
+        const brushTool = document.getElementById('brush-tool');
+        const eraserTool = document.getElementById('eraser-tool');
+        const brushSize = document.getElementById('brush-size');
+        const brushSizeDisplay = document.getElementById('brush-size-display');
+        const colorBtns = document.querySelectorAll('.color-btn');
+        const uploadBgBtn = document.getElementById('upload-bg-btn');
+        const clearCanvasBtn = document.getElementById('clear-canvas-btn');
+        const saveDrawingBtn = document.getElementById('save-drawing-btn');
+        const drawingBgUpload = document.getElementById('drawing-bg-upload');
+        
+        // 展開回應相關元素
+        const responsesModal = document.getElementById('responses-modal');
+        const closeResponsesBtn = document.getElementById('close-responses-btn');
+        const responsesModalTitle = document.getElementById('responses-modal-title');
+        const responsesContainer = document.getElementById('responses-container');
+
+
+        // 全域變數
+        let db, auth;
+        let sections = [];
+        let likedPosts = new Set();
+        let syncStatusTimer = null;
+        let confirmCallback = null;
+        const urlParams = new URLSearchParams(window.location.search);
+        const isStudentMode = urlParams.get('mode') === 'student';
+        const dataParam = urlParams.get('data');
+        let isPadletStyle = localStorage.getItem('isPadletStyle') === 'true';
+        let uploadedImageData = null; 
+        let uploadedBgImageData = null; 
+        let unsubscribeSettings = null; 
+        let unsubscribeSections = null; 
+        let postUnsubscribers = {}; 
+        let unsubscribeArchives = null;
+        let importData = null;
+
+        // 生成隨機4碼英數組合
+        function generateRandomCode() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let result = '';
+            for (let i = 0; i < 4; i++) {
+                result += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return result;
+        }
+
+        // 檢查代碼是否已存在
+        async function isCodeExists(code) {
+            try {
+                const q = query(collection(db, "archives"), where("dataCode", "==", code));
+                const snapshot = await getDocs(q);
+                return !snapshot.empty;
+            } catch (error) {
+                console.error("檢查代碼失敗:", error);
+                return false;
+            }
+        }
+
+        // 生成唯一的隨機代碼
+        async function generateUniqueCode() {
+            let code;
+            let attempts = 0;
+            const maxAttempts = 100;
+            
+            do {
+                code = generateRandomCode();
+                attempts++;
+                if (attempts > maxAttempts) {
+                    throw new Error("無法生成唯一代碼，請稍後再試");
+                }
+            } while (await isCodeExists(code));
+            
+            return code;
+        }
+
+        // 根據代碼載入資料
+        async function loadDataByCode(code) {
+            try {
+                const q = query(collection(db, "archives"), where("dataCode", "==", code));
+                const snapshot = await getDocs(q);
+                
+                if (snapshot.empty) {
+                    showAlert(`找不到代碼為 ${code} 的資料！`, "錯誤");
+                    return false;
+                }
+                
+                const archiveDoc = snapshot.docs[0];
+                const archiveData = archiveDoc.data();
+                
+                // 清空目前的 sections
+                const sectionsSnapshot = await getDocs(collection(db, "sections"));
+                const deleteBatch = writeBatch(db);
+                for (const sectionDoc of sectionsSnapshot.docs) {
+                    const postsSnapshot = await getDocs(collection(db, `sections/${sectionDoc.id}/posts`));
+                    postsSnapshot.forEach(postDoc => deleteBatch.delete(postDoc.ref));
+                    deleteBatch.delete(sectionDoc.ref);
+                }
+                await deleteBatch.commit();
+
+                // 寫入新資料
+                const addBatch = writeBatch(db);
+                // 寫入設定
+                const settingsRef = doc(db, "settings", "config");
+                addBatch.set(settingsRef, {
+                    mainTitle: archiveData.title,
+                    backgroundUrl: archiveData.backgroundUrl
+                });
+
+                // 寫入 sections 和 posts
+                archiveData.sections.forEach((section, index) => {
+                    const sectionRef = doc(collection(db, "sections"));
+                    const sectionData = {
+                        title: section.title,
+                        createdAt: new Date(section.createdAt),
+                        order: index
+                    };
+                    addBatch.set(sectionRef, sectionData);
+
+                    section.posts.forEach((post, postIndex) => {
+                        const postRef = doc(collection(db, `sections/${sectionRef.id}/posts`));
+                        const postData = {
+                            ...post,
+                            createdAt: new Date(post.createdAt),
+                            order: postIndex
+                        };
+                        addBatch.set(postRef, postData);
+                    });
+                });
+
+                await addBatch.commit();
+                return true;
+            } catch (error) {
+                console.error("載入資料失敗:", error);
+                showAlert(`載入資料失敗！\n${error.message}`, "錯誤");
+                return false;
+            }
+        }
+
+        // 為沒有代碼的舊存檔分配隨機代碼
+        async function assignCodesForOldArchives() {
+            try {
+                const q = query(collection(db, "archives"));
+                const snapshot = await getDocs(q);
+                
+                const updatePromises = [];
+                for (const doc of snapshot.docs) {
+                    const data = doc.data();
+                    if (!data.dataCode) {
+                        const newCode = await generateUniqueCode();
+                        updatePromises.push(
+                            updateDoc(doc.ref, { dataCode: newCode })
+                        );
+                    }
+                }
+                
+                if (updatePromises.length > 0) {
+                    await Promise.all(updatePromises);
+                    console.log(`已為 ${updatePromises.length} 個舊存檔分配代碼`);
+                }
+            } catch (error) {
+                console.error("分配代碼失敗:", error);
+            }
+        }
+
+        // 新回應牆功能
+        const createNewWall = async () => {
+            if (!checkFirebase()) return;
+            
+            showConfirm('確定要清空當前回應牆並建立新的回應牆嗎？此操作會永久刪除所有現有內容。', async () => {
+                try {
+                    showSyncStatus(true, false, '清空回應牆中...');
+                    
+                    // 清空所有 sections 和 posts
+                    const sectionsSnapshot = await getDocs(collection(db, "sections"));
+                    const deleteBatch = writeBatch(db);
+                    
+                    for (const sectionDoc of sectionsSnapshot.docs) {
+                        const postsSnapshot = await getDocs(collection(db, `sections/${sectionDoc.id}/posts`));
+                        postsSnapshot.forEach(postDoc => deleteBatch.delete(postDoc.ref));
+                        deleteBatch.delete(sectionDoc.ref);
+                    }
+                    
+                    await deleteBatch.commit();
+                    
+                    // 重設主標題
+                    await setDoc(doc(db, "settings", "config"), { 
+                        mainTitle: "Plurk 風格回應牆 - Firebase 版",
+                        backgroundUrl: "https://images.plurk.com/6rYRzJbEIqWyR8wei5we.jpg"
+                    }, { merge: true });
+                    
+                    showSyncStatus(false, false, '新回應牆已建立！');
+                    showAlert('新回應牆已建立！');
+                    
+                } catch (error) {
+                    console.error("建立新回應牆失敗:", error);
+                    showAlert(`建立新回應牆失敗！\n${error.message}`, "錯誤");
+                    showSyncStatus(false, true);
+                }
+            });
+        };
+
+        // 風格切換功能
+        const toggleStyle = () => {
+            isPadletStyle = !isPadletStyle;
+            localStorage.setItem('isPadletStyle', isPadletStyle.toString());
+            applyStyle();
+            updateStyleButton();
+            updateUIText();
+            renderApp(); // 重新渲染以應用新的排序
+        };
+
+        // 應用當前風格
+        const applyStyle = () => {
+            if (isPadletStyle) {
+                document.body.classList.add('padlet-style');
+            } else {
+                document.body.classList.remove('padlet-style');
+            }
+        };
+
+        // 更新風格按鈕顯示
+        const updateStyleButton = () => {
+            if (isPadletStyle) {
+                styleToggleBtn.textContent = '📋';
+                styleToggleBtn.title = '切換Plurk風格';
+            } else {
+                styleToggleBtn.textContent = '🎛️';
+                styleToggleBtn.title = '切換Padlet風格';
+            }
+        };
+
+        // 更新UI文字根據風格
+        const updateUIText = () => {
+            const addSectionBtn = document.getElementById('add-section-btn');
+            const newPlurkInput = document.getElementById('new-plurk-input');
+            
+            if (isPadletStyle) {
+                addSectionBtn.textContent = '新增區段';
+                newPlurkInput.placeholder = '輸入區段主題...';
+            } else {
+                addSectionBtn.textContent = '發新噗';
+                newPlurkInput.placeholder = '分享今天發生了什麼事...';
+            }
+        };
+
+        let newPlurkUploadedImage = null;
+        
+        // 塗鴉相關變數
+        let drawingCtx = null;
+        let drawingBgCtx = null;
+        let isDrawing = false;
+        let currentTool = 'brush';
+        let currentColor = '#000000';
+        let currentBrushSize = 5;
+        let drawingData = null;
+        let originalPostImages = [];
+        let currentSectionId = null;
+        let currentPostId = null;
+
+        // 顯示自訂訊息視窗的函式
+        const showAlert = (message, title = '系統訊息') => {
+            alertTitle.textContent = title;
+            alertMessage.textContent = message;
+            alertModal.classList.remove('hidden');
+        };
+
+        // 初始化
+        const init = () => {
+            setupEventListeners();
+            applyModeRestrictions();
+            loadLikedPostsFromLocal();
+            
+            // 初始化風格設定
+            applyStyle();
+            updateStyleButton();
+            updateUIText();
+
+            if (firebaseConfig.apiKey === "YOUR_API_KEY" || firebaseConfig.projectId === "YOUR_PROJECT_ID") {
+                wallContainer.innerHTML = '<div class="text-center text-gray-500 p-8 w-full">尚未設定 Firebase。請點擊右上角的 ❓ 按鈕，依照說明完成設定。</div>';
+                return; 
+            }
+
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                signInAnonymously(auth).catch(error => {
+                    console.error("匿名登入失敗:", error);
+                    showAlert("無法連接到認證服務，部分功能可能無法使用。", "錯誤");
+                });
+
+                onAuthStateChanged(auth, async user => {
+                    if (user) {
+                        console.log("已匿名登入，使用者 ID:", user.uid);
+                        
+                        // 為舊存檔分配代碼
+                        assignCodesForOldArchives();
+                        
+                        // 檢查是否有URL參數要載入特定資料
+                        if (dataParam) {
+                            console.log("檢測到資料參數:", dataParam);
+                            const loaded = await loadDataByCode(dataParam);
+                            if (loaded) {
+                                // 如果成功載入，等待一下讓資料同步，然後設置監聽器
+                                setTimeout(() => {
+                                    setupRealtimeListeners();
+                                }, 1000);
+                            } else {
+                                // 如果載入失敗，載入預設資料
+                                loadInitialData();
+                                setupRealtimeListeners();
+                            }
+                        } else {
+                            loadInitialData();
+                            setupRealtimeListeners();
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase 初始化失敗:", error);
+                showAlert(`Firebase 初始化失敗！請檢查您的設定是否正確。\n\n錯誤訊息: ${error.message}`, "嚴重錯誤");
+                wallContainer.innerHTML = `<div class="text-center text-red-500 p-8 w-full">Firebase 初始化失敗！<br>請按 F12 查看開發者工具中的詳細錯誤訊息，並確認您的 firebaseConfig 是否正確。</div>`;
+            }
+        };
+
+        // 根據模式（一般/學生）套用介面限制
+        const applyModeRestrictions = () => {
+            if (isStudentMode) {
+                newPlurkSection.classList.add('hidden');
+                newWallBtn.classList.add('hidden');
+                styleToggleBtn.classList.add('hidden');
+                studentModeBtn.classList.add('hidden');
+                settingBgBtn.classList.add('hidden');
+                helpBtn.classList.add('hidden');
+                mainTitleInput.readOnly = true;
+                saveBtn.classList.add('hidden');
+                openBtn.classList.add('hidden');
+                exportBtn.classList.add('hidden');
+                importBtn.classList.add('hidden');
+                downloadHtmlBtn.classList.add('hidden');
+            }
+        };
+
+        // 顯示/隱藏同步狀態提示
+        const showSyncStatus = (isSyncing, isError = false, message = '') => {
+            clearTimeout(syncStatusTimer);
+            syncStatus.classList.remove('opacity-0');
+            syncStatus.classList.remove('bg-gray-800', 'bg-green-600', 'bg-red-500');
+
+            if (isSyncing) {
+                syncStatus.textContent = message || '與雲端同步中...';
+                syncStatus.classList.add('bg-gray-800');
+            } else {
+                if (isError) {
+                    syncStatus.textContent = message || '同步失敗！';
+                    syncStatus.classList.add('bg-red-500');
+                } else {
+                    syncStatus.textContent = message || '同步完成！';
+                    syncStatus.classList.add('bg-green-600');
+                }
+                syncStatusTimer = setTimeout(() => {
+                    syncStatus.classList.add('opacity-0');
+                }, 2000);
+            }
+        };
+
+        // 顯示自訂確認視窗
+        const showConfirm = (message, onConfirm) => {
+            confirmMsg.textContent = message;
+            confirmCallback = onConfirm;
+            confirmModal.classList.remove('hidden');
+        };
+
+        // 隱藏自訂確認視窗
+        const hideConfirm = () => {
+            confirmModal.classList.add('hidden');
+            confirmCallback = null;
+        };
+        
+        const checkFirebase = () => {
+            if (!db) {
+                showAlert('請先完成 Firebase 設定！點擊右上角「❓」查看說明。');
+                return false;
+            }
+            return true;
+        };
+
+        // 從 LocalStorage 載入按讚紀錄
+        const loadLikedPostsFromLocal = () => {
+            const localLiked = localStorage.getItem('plurk_liked_posts');
+            if (localLiked) {
+                likedPosts = new Set(JSON.parse(localLiked));
+            }
+        };
+
+        // 將按讚紀錄存到 LocalStorage
+        const saveLikedPostsToLocal = () => {
+            localStorage.setItem('plurk_liked_posts', JSON.stringify([...likedPosts]));
+        };
+
+        // 載入初始資料 (僅執行一次)
+        const loadInitialData = async () => {
+            if (!checkFirebase()) return;
+            const settingsDoc = await getDoc(doc(db, "settings", "config"));
+            if (settingsDoc.exists()) {
+                const data = settingsDoc.data();
+                mainTitleInput.value = data.mainTitle || 'Plurk 風格回應牆 (Firebase 版)';
+                if (data.backgroundUrl) {
+                    wallContainer.style.backgroundImage = `url('${data.backgroundUrl}')`;
+                }
+            }
+        };
+
+        // 設定即時資料監聽
+        const setupRealtimeListeners = () => {
+            if (!checkFirebase()) return;
+
+            unsubscribeSettings = onSnapshot(doc(db, "settings", "config"), (doc) => {
+                if (doc.exists()) {
+                    const data = doc.data();
+                    mainTitleInput.value = data.mainTitle || 'Plurk 風格回應牆 (Firebase 版)';
+                    if (data.backgroundUrl) {
+                        wallContainer.style.backgroundImage = `url('${data.backgroundUrl}')`;
+                    }
+                }
+            });
+
+            const q = query(collection(db, "sections"), orderBy("createdAt", "desc"));
+            
+            unsubscribeSections = onSnapshot(q, (snapshot) => {
+                snapshot.docChanges().forEach((change) => {
+                    const sectionId = change.doc.id;
+                    const sectionData = change.doc.data();
+
+                    if (change.type === "added") {
+                        if (!sections.some(s => s.id === sectionId)) {
+                            const newSection = { id: sectionId, ...sectionData, posts: [] };
+                            sections.push(newSection); 
+
+                            const postsQuery = query(collection(db, `sections/${sectionId}/posts`), orderBy("createdAt", "desc"));
+                            postUnsubscribers[sectionId] = onSnapshot(postsQuery, (postsSnapshot) => {
+                                const targetSectionIndex = sections.findIndex(s => s.id === sectionId);
+                                if (targetSectionIndex > -1) {
+                                    sections[targetSectionIndex].posts = postsSnapshot.docs.map(postDoc => ({ id: postDoc.id, ...postDoc.data() }));
+                                    renderApp(); 
+                                }
+                            });
+                        }
+                    }
+                    if (change.type === "modified") {
+                        const targetSectionIndex = sections.findIndex(s => s.id === sectionId);
+                        if (targetSectionIndex > -1) {
+                            sections[targetSectionIndex] = { ...sections[targetSectionIndex], ...sectionData };
+                        }
+                    }
+                    if (change.type === "removed") {
+                        if (postUnsubscribers[sectionId]) {
+                            postUnsubscribers[sectionId]();
+                            delete postUnsubscribers[sectionId];
+                        }
+                        sections = sections.filter(s => s.id !== sectionId);
+                    }
+                });
+
+                sections.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+                renderApp();
+            });
+        };
+
+        // 設置事件監聽器
+        const setupEventListeners = () => {
+            alertOkBtn.addEventListener('click', () => alertModal.classList.add('hidden'));
+
+            mainTitleInput.addEventListener('blur', async (e) => {
+                if (!checkFirebase()) return;
+                const newTitle = e.target.value || 'Plurk 風格回應牆 (Firebase 版)';
+                try {
+                    await setDoc(doc(db, "settings", "config"), { mainTitle: newTitle }, { merge: true });
+                } catch(error) {
+                    console.error("更新標題失敗:", error);
+                }
+            });
+
+            addSectionBtn.addEventListener('click', addSection);
+            newPlurkInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') addSection();
+            });
+            
+            // 新增噗文類型切換
+            document.querySelectorAll('input[name="new-plurk-type"]').forEach(radio => {
+                radio.addEventListener('change', handleNewPlurkTypeChange);
+            });
+            document.getElementById('new-plurk-file').addEventListener('change', (e) => handleImageUpload(e.target.files[0], 'new-plurk'));
+
+            closeModalBtn.addEventListener('click', closeModal);
+            postModal.addEventListener('click', (e) => {
+                if (e.target === postModal) closeModal();
+            });
+            postForm.addEventListener('submit', handleFormSubmit);
+            postForm.querySelectorAll('input[name="post-type"]').forEach(radio => {
+                radio.addEventListener('change', handleTypeChange);
+            });
+
+            dropZone.addEventListener('click', () => imageUpload.click());
+            imageUpload.addEventListener('change', (e) => handleImageUpload(e.target.files[0], 'response'));
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, handleDragEvents, false);
+            });
+            dropZone.addEventListener('drop', handleImageDrop);
+
+            helpBtn.addEventListener('click', () => helpModal.classList.remove('hidden'));
+            closeHelpModalBtn.addEventListener('click', () => helpModal.classList.add('hidden'));
+            helpModal.addEventListener('click', (e) => {
+                if (e.target === helpModal) helpModal.classList.add('hidden');
+            });
+
+            studentModeBtn.addEventListener('click', () => {
+                const baseUrl = window.location.href.split('?')[0];
+                const studentUrl = baseUrl + '?mode=student';
+                studentUrlInput.value = studentUrl;
+                
+                const qrcodeContainer = document.getElementById('qrcode-container');
+                qrcodeContainer.innerHTML = ''; 
+                try {
+                    new QRCode(qrcodeContainer, {
+                        text: studentUrl,
+                        width: 192,
+                        height: 192,
+                        colorDark : "#000000",
+                        colorLight : "#ffffff",
+                        correctLevel : QRCode.CorrectLevel.H
+                    });
+                } catch (e) {
+                    qrcodeContainer.innerHTML = '<p class="text-red-500 text-center">無法生成QR Code，因為網址太長了。<br>請將此html檔案改名為簡短的英文名稱後再試一次。</p>';
+                    console.error("QR Code generation error:", e);
+                }
+
+                studentModeModal.classList.remove('hidden');
+            });
+            closeStudentModalBtn.addEventListener('click', () => studentModeModal.classList.add('hidden'));
+            copyStudentUrlBtn.addEventListener('click', () => {
+                studentUrlInput.select();
+                document.execCommand('copy');
+                showAlert('學生模式網址已複製！');
+            });
+            openStudentUrlBtn.addEventListener('click', () => {
+                window.open(studentUrlInput.value, '_blank');
+            });
+            
+            settingBgBtn.addEventListener('click', () => settingBgModal.classList.remove('hidden'));
+            closeBgModalBtn.addEventListener('click', () => {
+                settingBgModal.classList.add('hidden');
+                uploadedBgImageData = null;
+                document.getElementById('bg-upload-filename').textContent = '';
+            });
+            bgDropZone.addEventListener('click', () => bgImageUpload.click());
+            bgImageUpload.addEventListener('change', (e) => handleImageUpload(e.target.files[0], 'background'));
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                bgDropZone.addEventListener(eventName, (e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    if (e.type === 'dragenter' || e.type === 'dragover') {
+                        bgDropZone.classList.add('bg-gray-100');
+                    } else if (e.type === 'dragleave') {
+                        bgDropZone.classList.remove('bg-gray-100');
+                    }
+                }, false);
+            });
+            bgDropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                bgDropZone.classList.remove('bg-gray-100');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) handleImageUpload(files[0], 'background');
+            });
+            submitBgBtn.addEventListener('click', async () => {
+                if (!checkFirebase()) return;
+                if (uploadedBgImageData) {
+                    showSyncStatus(true, false, '設定背景中...');
+                    try {
+                        await setDoc(doc(db, "settings", "config"), { backgroundUrl: uploadedBgImageData }, { merge: true });
+                        showSyncStatus(false, false, '背景已更新！');
+                        settingBgModal.classList.add('hidden');
+                        uploadedBgImageData = null;
+                        document.getElementById('bg-upload-filename').textContent = '';
+                    } catch (error) {
+                        console.error("更新背景失敗:", error);
+                        showAlert(`更新背景失敗！可能是圖片檔案太大。\n${error.message}`, "錯誤");
+                        showSyncStatus(false, true);
+                    }
+                } else {
+                    showAlert('請先選擇一張圖片！');
+                }
+            });
+            restoreBgBtn.addEventListener('click', restoreDefaultBackground);
+
+            // 關閉圖片檢視器
+            const closeImageViewerBtn = document.getElementById('close-image-viewer-btn');
+            const closeImageViewer = () => {
+                imageViewer.classList.add('hidden');
+                resetImageZoom();
+            };
+
+            closeImageViewerBtn.addEventListener('click', closeImageViewer);
+            imageViewer.addEventListener('click', (e) => {
+                if (e.target === imageViewer) {
+                    closeImageViewer();
+                }
+            });
+
+            // 圖片縮放功能
+            const imageContainer = document.getElementById('image-container');
+            const imageContent = document.querySelector('.image-content');
+            let currentScale = 1;
+            let initialDistance = 0;
+            let lastScale = 1;
+
+            // 重置圖片縮放
+            const resetImageZoom = () => {
+                currentScale = 1;
+                lastScale = 1;
+                imageContent.style.transform = 'scale(1)';
+            };
+
+            // 設置圖片縮放
+            const setImageScale = (scale) => {
+                const minScale = 0.5;
+                const maxScale = 5;
+                currentScale = Math.max(minScale, Math.min(maxScale, scale));
+                imageContent.style.transform = `scale(${currentScale})`;
+            };
+
+            // PC 滑鼠滾輪縮放
+            imageContainer.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const zoomFactor = 0.1;
+                const delta = e.deltaY > 0 ? -zoomFactor : zoomFactor;
+                setImageScale(currentScale + delta);
+            });
+
+            // iPad 觸控縮放
+            let touches = {};
+            
+            imageContainer.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                const touchList = e.touches;
+                
+                if (touchList.length === 2) {
+                    // 雙指觸控開始
+                    const touch1 = touchList[0];
+                    const touch2 = touchList[1];
+                    
+                    touches.touch1 = { x: touch1.clientX, y: touch1.clientY };
+                    touches.touch2 = { x: touch2.clientX, y: touch2.clientY };
+                    
+                    initialDistance = Math.sqrt(
+                        Math.pow(touch2.clientX - touch1.clientX, 2) +
+                        Math.pow(touch2.clientY - touch1.clientY, 2)
+                    );
+                    lastScale = currentScale;
+                }
+            });
+
+            imageContainer.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                const touchList = e.touches;
+                
+                if (touchList.length === 2 && initialDistance > 0) {
+                    const touch1 = touchList[0];
+                    const touch2 = touchList[1];
+                    
+                    const currentDistance = Math.sqrt(
+                        Math.pow(touch2.clientX - touch1.clientX, 2) +
+                        Math.pow(touch2.clientY - touch1.clientY, 2)
+                    );
+                    
+                    const scale = lastScale * (currentDistance / initialDistance);
+                    setImageScale(scale);
+                }
+            });
+
+            imageContainer.addEventListener('touchend', (e) => {
+                const touchList = e.touches;
+                if (touchList.length < 2) {
+                    initialDistance = 0;
+                    touches = {};
+                }
+            });
+
+            // 圖片載入時重置縮放
+            imageContent.addEventListener('load', resetImageZoom);
+
+            confirmOkBtn.addEventListener('click', () => {
+                if (typeof confirmCallback === 'function') {
+                    confirmCallback();
+                }
+                hideConfirm();
+            });
+            confirmCancelBtn.addEventListener('click', hideConfirm);
+            confirmModal.addEventListener('click', (e) => {
+                 if (e.target === confirmModal) hideConfirm();
+            });
+
+            newWallBtn.addEventListener('click', createNewWall);
+            styleToggleBtn.addEventListener('click', toggleStyle);
+            saveBtn.addEventListener('click', saveArchive);
+            openBtn.addEventListener('click', openArchiveModal);
+            exportBtn.addEventListener('click', exportData);
+            importBtn.addEventListener('click', () => importModal.classList.remove('hidden'));
+            downloadHtmlBtn.addEventListener('click', downloadHtml);
+            closeOpenModalBtn.addEventListener('click', () => {
+                openModalEl.classList.add('hidden');
+                if (unsubscribeArchives) {
+                    unsubscribeArchives();
+                    unsubscribeArchives = null;
+                }
+            });
+            closeImportModalBtn.addEventListener('click', () => {
+                importModal.classList.add('hidden');
+                importData = null;
+            });
+            importDropZone.addEventListener('click', () => importFileInput.click());
+            importFileInput.addEventListener('change', (e) => handleFileImport(e.target.files[0]));
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                importDropZone.addEventListener(eventName, (e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    if (e.type === 'dragenter' || e.type === 'dragover') {
+                        importDropZone.classList.add('bg-gray-100');
+                    } else if (e.type === 'dragleave') {
+                        importDropZone.classList.remove('bg-gray-100');
+                    }
+                }, false);
+            });
+            importDropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                importDropZone.classList.remove('bg-gray-100');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) handleFileImport(files[0]);
+            });
+            
+            // 塗鴉相關事件監聽
+            setupDrawingEventListeners();
+            
+            // 展開回應視窗事件監聽
+            closeResponsesBtn.addEventListener('click', () => responsesModal.classList.add('hidden'));
+            responsesModal.addEventListener('click', (e) => {
+                if (e.target === responsesModal) responsesModal.classList.add('hidden');
+            });
+        };
+
+        // 渲染應用
+        const renderApp = () => {
+            wallContainer.innerHTML = '';
+
+            if (sections.length === 0 && db) {
+                wallContainer.innerHTML = '<div class="text-center text-gray-500 p-8 w-full">還沒有任何噗文，快來發表第一則吧！</div>';
+                return;
+            }
+
+            // 在Padlet風格下反轉區段順序
+            const sectionsToRender = isPadletStyle ? [...sections].reverse() : sections;
+            
+            sectionsToRender.forEach(section => {
+                const sectionEl = createSectionElement(section);
+                wallContainer.appendChild(sectionEl);
+            });
+        };
+
+        // 創建噗文元素
+        const createSectionElement = (section) => {
+            const sectionEl = document.createElement('div');
+            sectionEl.className = 'section-column';
+            sectionEl.dataset.id = section.id;
+
+            let sectionImageHtml = '';
+            if (section.type === 'text_image' && section.imageUrl) {
+                sectionImageHtml = `<div class="mt-2 section-image-container"><img src="${section.imageUrl}" alt="" class="viewable-image w-full max-w-full h-auto object-cover rounded-md border border-gray-200 cursor-pointer"></div>`;
+            }
+
+            // 展開按鈕HTML (只有教師模式才顯示)
+            const expandBtnHtml = !isStudentMode ? `<button class="expand-responses-btn ml-2 p-1 text-gray-400 hover:text-blue-500" title="展開所有回應">📋</button>` : '';
+            
+            // 圖片切換按鈕HTML (如果有圖片就顯示)
+            const imageToggleBtnHtml = (section.type === 'text_image' && section.imageUrl) ? `<button class="image-toggle-btn ml-2 p-1 text-gray-400 hover:text-blue-500" title="隱藏圖片">🖼️</button>` : '';
+            
+            sectionEl.innerHTML = `
+                <div class="section-header" onclick="toggleSection('${section.id}')">
+                    <div class="plurk-avatar">P</div>
+                    <div class="flex-grow">
+                        <div class="flex items-center mb-2">
+                            <span class="toggle-btn mr-2 text-lg">▼</span>
+                            <span class="font-bold text-orange-600 mr-2">老師</span>
+                            <span class="plurk-qualifier">說</span>
+                            ${expandBtnHtml}
+                            ${imageToggleBtnHtml}
+                            <button class="delete-section-btn ml-auto p-1 text-gray-400 hover:text-red-500" title="刪除此噗">🗑️</button>
+                        </div>
+                        <textarea class="section-title-input preserve-lines" rows="1" placeholder="點擊這裡編輯噗文內容...">${section.title}</textarea>
+                        ${sectionImageHtml}
+                    </div>
+                </div>
+                <div class="section-add-post">
+                    <button class="add-post-btn theme-button bg-white hover:bg-gray-100 w-full py-1 rounded-md text-sm text-gray-600 font-bold">+ 新增回應</button>
+                </div>
+                <div class="section-posts"></div>
+                <div class="section-footer p-2 border-t border-gray-200 bg-gray-50 rounded-b-lg">
+                    <button class="add-post-btn-footer theme-button bg-white hover:bg-gray-100 w-full py-1 rounded-md text-sm text-gray-600 font-bold">+ 新增回應</button>
+                </div>
+            `;
+            
+            const titleInput = sectionEl.querySelector('.section-title-input');
+            const deleteBtn = sectionEl.querySelector('.delete-section-btn');
+            const expandBtn = sectionEl.querySelector('.expand-responses-btn');
+            const imageToggleBtn = sectionEl.querySelector('.image-toggle-btn');
+
+            if (isStudentMode) {
+                titleInput.readOnly = true;
+                if(deleteBtn) deleteBtn.remove();
+            } else {
+                titleInput.addEventListener('blur', () => {
+                    updateSectionTitle(section.id, titleInput.value);
+                });
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    deleteSection(section.id);
+                });
+                
+                // 展開回應按鈕事件
+                if (expandBtn) {
+                    expandBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        openResponsesModal(sectionEl);
+                    });
+                }
+            }
+            
+            // 圖片切換按鈕事件 (學生和老師都可以使用)
+            if (imageToggleBtn) {
+                imageToggleBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleSectionImage(sectionEl);
+                });
+            }
+            
+            titleInput.addEventListener('input', autoResizeTextarea);
+            setTimeout(() => autoResizeTextarea({target: titleInput}), 0);
+
+            const postsContainer = sectionEl.querySelector('.section-posts');
+            renderPosts(postsContainer, section.posts, section.id);
+
+            // 為兩個新增回應按鈕添加事件監聽器
+            const addPostBtns = sectionEl.querySelectorAll('.add-post-btn, .add-post-btn-footer');
+            addPostBtns.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    // 記錄原始噗文的圖片以供塗鴉使用
+                    originalPostImages = [];
+                    if (section.type === 'text_image' && section.imageUrl) {
+                        originalPostImages.push(section.imageUrl);
+                    }
+                    // 也查找回應中的圖片
+                    if (section.posts) {
+                        section.posts.forEach(post => {
+                            if ((post.type === 'image_url' || post.type === 'image_upload') && post.url) {
+                                originalPostImages.push(post.url);
+                            }
+                        });
+                    }
+                    openModal('新增回應', section.id);
+                });
+            });
+            
+            // 為噗文中的圖片加上點擊放大功能
+            const sectionImg = sectionEl.querySelector('.viewable-image');
+            if (sectionImg) {
+                sectionImg.addEventListener('click', () => {
+                    imageViewer.querySelector('.image-content').src = sectionImg.src;
+                    imageViewer.classList.remove('hidden');
+                });
+            }
+
+            return sectionEl;
+        };
+
+        // 渲染回應
+        const renderPosts = (container, posts, sectionId) => {
+            container.innerHTML = '';
+            if (!posts) return;
+
+            posts.forEach(post => {
+                const postEl = document.createElement('div');
+                postEl.className = 'post-card';
+                postEl.dataset.id = post.id;
+
+                let mediaHtml = '';
+                switch (post.type) {
+                    case 'image_url':
+                    case 'image_upload':
+                        mediaHtml = `<div class="mt-2"><img src="${post.url}" alt="${post.title}" class="viewable-image w-full max-w-full h-auto object-cover rounded-md border border-gray-200 cursor-pointer" onerror="this.onerror=null;this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjE1MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjY2NjIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzAwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPuWcluePh+i8ieWFpeWksei0pTwvdGV4dD48L3N2Zz4='"></div>`;
+                        break;
+                    case 'youtube':
+                        const embedUrl = getYoutubeEmbedUrl(post.url);
+                        if (embedUrl) {
+                            mediaHtml = `<div class="aspect-w-16 aspect-h-9 mt-2 border border-gray-200 rounded-md overflow-hidden"><iframe src="${embedUrl}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen class="w-full h-full"></iframe></div>`;
+                        }
+                        break;
+                    case 'link':
+                        mediaHtml = `<a href="${post.url}" target="_blank" rel="noopener noreferrer" class="block mt-2 p-2 bg-gray-100 rounded border border-gray-200 text-blue-600 hover:underline break-all text-sm">${post.url}</a>`;
+                        break;
+                    case 'drawing':
+                        mediaHtml = `<div class="mt-2"><img src="${post.url}" alt="塗鴉作品" class="viewable-image w-full max-w-full h-auto object-cover rounded-md border border-gray-200 cursor-pointer"></div>`;
+                        break;
+                }
+
+                const isLiked = likedPosts.has(post.id);
+                const avatarChar = (String(post.title || '')[0] || 'R').toUpperCase();
+
+                postEl.innerHTML = `
+                    <div class="reply-avatar">${avatarChar}</div>
+                    <div class="flex-grow">
+                        <div class="flex justify-between items-start mb-1">
+                            <h3 class="font-bold text-sm text-gray-800 break-words">${post.title}</h3>
+                            <div class="flex items-center text-xs text-gray-500 flex-shrink-0 ml-2">
+                                <span class="font-bold text-sm mr-1">${post.likes || 0}</span>
+                                <button class="like-btn ${isLiked ? 'liked' : ''}" title="${isLiked ? '已讚' : '喜歡'}">❤️</button>
+                                <div class="post-controls flex space-x-1 flex-shrink-0 ml-2">
+                                    <button class="edit-btn p-1 text-gray-400 hover:text-blue-500" title="編輯">✏️</button>
+                                    <button class="delete-btn p-1 text-gray-400 hover:text-red-500" title="刪除">🗑️</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-sm text-gray-700 preserve-lines break-words">${post.content}</div>
+                        ${mediaHtml}
+                    </div>
+                `;
+
+                postEl.querySelector('.like-btn').addEventListener('click', (e) => {
+                    const likeBtn = e.target;
+                    const likesSpan = likeBtn.previousElementSibling;
+                    likePost(sectionId, post.id, likesSpan, likeBtn);
+                });
+                
+                const controls = postEl.querySelector('.post-controls');
+                if (isStudentMode) {
+                    controls.remove();
+                } else {
+                    controls.querySelector('.edit-btn').addEventListener('click', () => editPost(sectionId, post.id));
+                    controls.querySelector('.delete-btn').addEventListener('click', () => deletePost(sectionId, post.id));
+                }
+
+                const img = postEl.querySelector('.viewable-image');
+                if (img) {
+                    img.addEventListener('click', () => {
+                        imageViewer.querySelector('.image-content').src = img.src;
+                        imageViewer.classList.remove('hidden');
+                    });
+                }
+
+                container.appendChild(postEl);
+            });
+        };
+
+        // 處理新噗文類型切換
+        const handleNewPlurkTypeChange = (e) => {
+            const uploadDiv = document.getElementById('new-plurk-upload');
+            if (e.target.value === 'text_image') {
+                uploadDiv.classList.remove('hidden');
+            } else {
+                uploadDiv.classList.add('hidden');
+                newPlurkUploadedImage = null;
+                document.getElementById('new-plurk-file').value = '';
+            }
+        };
+        
+        // 新增噗文
+        const addSection = async () => {
+            if (!checkFirebase()) return;
+            const content = newPlurkInput.value.trim();
+            const type = document.querySelector('input[name="new-plurk-type"]:checked').value;
+            
+            if (!content) {
+                showAlert('請輸入噗文內容');
+                return;
+            }
+            
+            if (type === 'text_image' && !newPlurkUploadedImage) {
+                showAlert('請選擇要上傳的圖片');
+                return;
+            }
+
+            const newSection = {
+                title: content,
+                createdAt: serverTimestamp(),
+                type: type,
+                imageUrl: type === 'text_image' ? newPlurkUploadedImage : null
+            };
+            
+            showSyncStatus(true, false, '發佈中...');
+            try {
+                await addDoc(collection(db, "sections"), newSection);
+                newPlurkInput.value = '';
+                newPlurkUploadedImage = null;
+                document.getElementById('new-plurk-file').value = '';
+                document.querySelector('input[name="new-plurk-type"][value="text"]').checked = true;
+                handleNewPlurkTypeChange({target: {value: 'text'}});
+                showSyncStatus(false, false, '發佈成功！');
+            } catch (error) {
+                console.error("新增噗文失敗:", error);
+                showAlert("新增噗文失敗！", "錯誤");
+                showSyncStatus(false, true);
+            }
+        };
+
+        // 更新噗文標題
+        const updateSectionTitle = async (sectionId, newTitle) => {
+            if (!checkFirebase()) return;
+            const sectionRef = doc(db, "sections", sectionId);
+            try {
+                await updateDoc(sectionRef, { title: newTitle });
+            } catch (error) {
+                console.error("更新噗文標題失敗:", error);
+            }
+        };
+
+        // 刪除噗文
+        const deleteSection = (sectionId) => {
+            if (!checkFirebase()) return;
+            showConfirm('確定要刪除此噗文嗎？所有回應也會一起刪除。', async () => {
+                showSyncStatus(true, false, '刪除中...');
+                try {
+                    const postsQuery = query(collection(db, `sections/${sectionId}/posts`));
+                    const postsSnapshot = await getDocs(postsQuery);
+                    const batch = writeBatch(db);
+                    postsSnapshot.forEach(doc => {
+                        batch.delete(doc.ref);
+                    });
+                    await batch.commit();
+
+                    await deleteDoc(doc(db, "sections", sectionId));
+                    showSyncStatus(false, false, '刪除成功！');
+                } catch (error) {
+                    console.error("刪除噗文失敗:", error);
+                    showAlert("刪除噗文失敗！", "錯誤");
+                    showSyncStatus(false, true);
+                }
+            });
+        };
+
+        // 開啟模態框
+        const openModal = (title, sectionId, postId = null) => {
+            if (!checkFirebase()) return;
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('section-id').value = sectionId;
+            document.getElementById('post-id').value = postId || '';
+            
+            currentSectionId = sectionId;
+            currentPostId = postId;
+
+            if (postId && !isStudentMode) {
+                const section = sections.find(s => s.id === sectionId);
+                const post = section?.posts.find(p => p.id === postId);
+                if (post) {
+                    document.getElementById('post-title').value = post.title;
+                    document.getElementById('post-content').value = post.content;
+                    document.getElementById('post-url').value = post.type !== 'image_upload' && post.type !== 'drawing' ? (post.url || '') : '';
+                    document.querySelector(`input[name="post-type"][value="${post.type}"]`).checked = true;
+                    handleTypeChange({ target: document.querySelector(`input[name="post-type"][value="${post.type}"]`) });
+                    submitBtn.textContent = '更新回應';
+                }
+            } else {
+                postForm.reset();
+                document.querySelector('input[name="post-type"][value="text"]').checked = true;
+                handleTypeChange({ target: document.querySelector('input[name="post-type"][value="text"]') });
+                submitBtn.textContent = '送出回應';
+            }
+            postModal.classList.remove('hidden');
+        };
+        
+        const closeModal = () => {
+            postModal.classList.add('hidden');
+            postForm.reset();
+            document.getElementById('upload-filename').textContent = '';
+            uploadedImageData = null;
+            drawingData = null;
+            const existingBtn = document.querySelector('.drawing-open-btn');
+            if (existingBtn) existingBtn.remove();
+        };
+
+        // 處理表單提交
+        const handleFormSubmit = async (e) => {
+            e.preventDefault();
+            if (!checkFirebase()) return;
+
+            const sectionId = document.getElementById('section-id').value;
+            const postId = document.getElementById('post-id').value;
+            const type = postForm.querySelector('input[name="post-type"]:checked').value;
+            const title = document.getElementById('post-title').value;
+            const content = document.getElementById('post-content').value;
+            const url = document.getElementById('post-url').value;
+
+            if (!title.trim()) {
+                showAlert('請輸入暱稱');
+                return;
+            }
+
+            let finalUrl = url;
+
+            if (type === 'image_upload') {
+                if (uploadedImageData) {
+                    finalUrl = uploadedImageData;
+                } else if (!postId) {
+                    showAlert('請選擇要上傳的圖片');
+                    return;
+                } else {
+                    const section = sections.find(s => s.id === sectionId);
+                    const post = section?.posts.find(p => p.id === postId);
+                    finalUrl = post.url;
+                }
+            } else if (type === 'drawing') {
+                if (drawingData) {
+                    finalUrl = drawingData;
+                } else if (!postId) {
+                    showAlert('請先完成塗鴉');
+                    return;
+                } else {
+                    const section = sections.find(s => s.id === sectionId);
+                    const post = section?.posts.find(p => p.id === postId);
+                    finalUrl = post.url;
+                }
+            } else if ((type === 'text' && !content.trim()) || 
+                ((type === 'image_url' || type === 'youtube' || type === 'link') && !finalUrl.trim())) {
+                showAlert('請填寫必要內容');
+                return;
+            }
+
+            showSyncStatus(true, false, postId ? '更新中...' : '新增中...');
+            
+            try {
+                const postData = {
+                    title: title.trim(),
+                    content: content.trim(),
+                    type: type,
+                    url: finalUrl,
+                };
+
+                if (postId && !isStudentMode) {
+                    const postRef = doc(db, `sections/${sectionId}/posts`, postId);
+                    await updateDoc(postRef, postData);
+                } else {
+                    postData.likes = 0;
+                    postData.createdAt = serverTimestamp();
+                    await addDoc(collection(db, `sections/${sectionId}/posts`), postData);
+                }
+                
+                showSyncStatus(false, false, postId ? '更新成功！' : '新增成功！');
+                closeModal();
+
+            } catch (error) {
+                console.error("提交回應失敗:", error);
+                showAlert(`提交回應失敗！可能是圖片檔案太大。\n${error.message}`, "錯誤");
+                showSyncStatus(false, true);
+            }
+        };
+
+        const editPost = (sectionId, postId) => {
+            if(!isStudentMode) openModal('編輯回應', sectionId, postId);
+        }
+
+        // 刪除回應
+        const deletePost = (sectionId, postId) => {
+            if(isStudentMode || !checkFirebase()) return;
+            showConfirm('確定要刪除此回應嗎？', async () => {
+                showSyncStatus(true, false, '刪除中...');
+                try {
+                    await deleteDoc(doc(db, `sections/${sectionId}/posts`, postId));
+                    showSyncStatus(false, false, '刪除成功！');
+                } catch (error) {
+                    console.error("刪除回應失敗:", error);
+                    showAlert("刪除回應失敗！", "錯誤");
+                    showSyncStatus(false, true);
+                }
+            });
+        };
+
+        // 按讚
+        const likePost = async (sectionId, postId, likesSpan, likeBtn) => {
+            if (!checkFirebase()) return;
+            if (likedPosts.has(postId)) {
+                showAlert('你已經對此回應按過讚了！');
+                return;
+            }
+
+            const postRef = doc(db, `sections/${sectionId}/posts`, postId);
+            try {
+                await setDoc(postRef, {
+                    likes: increment(1)
+                }, { merge: true });
+                
+                // 獲取更新後的實際讚數
+                const updatedDoc = await getDoc(postRef);
+                if (updatedDoc.exists()) {
+                    const actualLikes = updatedDoc.data().likes || 0;
+                    likesSpan.textContent = actualLikes;
+                } else {
+                    likesSpan.textContent = 1;
+                }
+                
+                likeBtn.classList.add('liked');
+                likeBtn.title = '已讚';
+                
+                likedPosts.add(postId);
+                saveLikedPostsToLocal();
+            } catch (error) {
+                console.error("按讚失敗:", error);
+            }
+        };
+
+        // 摺疊噗文
+        window.toggleSection = (sectionId) => {
+            // 在Padlet風格下不執行收合功能
+            if (isPadletStyle) {
+                return;
+            }
+            
+            const sectionEl = document.querySelector(`[data-id="${sectionId}"]`);
+            if (sectionEl) {
+                sectionEl.classList.toggle('collapsed');
+            }
+        };
+
+        // 切換噗文圖片顯示/隱藏
+        const toggleSectionImage = (sectionEl) => {
+            const imageContainer = sectionEl.querySelector('.section-image-container');
+            const imageToggleBtn = sectionEl.querySelector('.image-toggle-btn');
+            
+            if (imageContainer && imageToggleBtn) {
+                if (imageContainer.style.display === 'none') {
+                    imageContainer.style.display = '';
+                    imageToggleBtn.textContent = '🖼️';
+                    imageToggleBtn.title = '隱藏圖片';
+                } else {
+                    imageContainer.style.display = 'none';
+                    imageToggleBtn.textContent = '🚫';
+                    imageToggleBtn.title = '顯示圖片';
+                }
+            }
+        };
+
+        // --- 新增：存檔與讀檔功能 ---
+
+        const saveArchive = async () => {
+            if (!checkFirebase()) return;
+            const title = mainTitleInput.value.trim();
+            if (!title) {
+                showAlert('請先為您的回應牆設定一個主標題，才能存檔。');
+                return;
+            }
+
+            showConfirm(`確定要將目前所有內容以「${title}」為檔名存檔嗎？`, async () => {
+                showSyncStatus(true, false, '存檔中...');
+                try {
+                    const settingsDoc = await getDoc(doc(db, "settings", "config"));
+                    const backgroundUrl = (settingsDoc.exists() && settingsDoc.data().backgroundUrl) ? settingsDoc.data().backgroundUrl : '';
+
+                    const serializableSections = sections.map(section => ({
+                        ...section,
+                        createdAt: section.createdAt?.toDate().toISOString() || new Date().toISOString(),
+                        posts: section.posts.map(post => ({
+                            ...post,
+                            createdAt: post.createdAt?.toDate().toISOString() || new Date().toISOString(),
+                        }))
+                    }));
+
+                    const dataCode = await generateUniqueCode();
+                    const archiveData = {
+                        title: title,
+                        backgroundUrl: backgroundUrl,
+                        savedAt: serverTimestamp(),
+                        sections: serializableSections,
+                        dataCode: dataCode
+                    };
+
+                    await addDoc(collection(db, "archives"), archiveData);
+                    showSyncStatus(false, false, '存檔成功！');
+                    showAlert(`已成功以「${title}」的名稱儲存檔案。`);
+                } catch (error) {
+                    console.error("存檔失敗:", error);
+                    showAlert(`存檔失敗！\n${error.message}`, "錯誤");
+                    showSyncStatus(false, true);
+                }
+            });
+        };
+
+        const openArchiveModal = () => {
+            if (!checkFirebase()) return;
+            openModalEl.classList.remove('hidden');
+
+            const q = query(collection(db, "archives"), orderBy("savedAt", "desc"));
+            unsubscribeArchives = onSnapshot(q, (snapshot) => {
+                archiveListContainer.innerHTML = '';
+                if (snapshot.empty) {
+                    archiveListContainer.innerHTML = '<p class="text-center text-gray-500">沒有任何存檔。</p>';
+                    return;
+                }
+                snapshot.forEach(doc => {
+                    const archive = doc.data();
+                    const archiveId = doc.id;
+                    const savedDate = archive.savedAt?.toDate().toLocaleString() || '未知日期';
+
+                    const itemEl = document.createElement('div');
+                    itemEl.className = 'p-3 border-b hover:bg-gray-50';
+                    const dataCode = archive.dataCode || '未設定';
+                    const baseUrl = window.location.href.split('?')[0];
+                    const dataUrl = `${baseUrl}?data=${dataCode}`;
+                    const studentUrl = `${baseUrl}?data=${dataCode}&mode=student`;
+                    
+                    itemEl.innerHTML = `
+                        <div class="flex items-center justify-between mb-2">
+                            <div>
+                                <p class="font-bold">${archive.title}</p>
+                                <p class="text-sm text-gray-500">儲存於：${savedDate}</p>
+                                <p class="text-xs text-blue-600">代碼：
+                                    <input type="text" value="${dataCode}" class="data-code-input bg-transparent border-b border-dashed border-blue-400 text-blue-600 w-16 text-center text-xs" data-id="${archiveId}" data-original="${dataCode}">
+                                </p>
+                            </div>
+                            <div class="flex gap-2">
+                                <button data-id="${archiveId}" class="open-archive-btn theme-button bg-blue-500 text-white py-1 px-3 rounded-md text-sm">開啟</button>
+                                <button data-id="${archiveId}" class="delete-archive-btn theme-button bg-red-500 text-white py-1 px-3 rounded-md text-sm">刪除</button>
+                            </div>
+                        </div>
+                        <div class="flex gap-2 text-xs">
+                            <button class="copy-url-btn theme-button bg-green-500 text-white py-1 px-2 rounded text-xs" data-url="${dataUrl}">複製連結</button>
+                            <button class="copy-student-url-btn theme-button bg-purple-500 text-white py-1 px-2 rounded text-xs" data-url="${studentUrl}">複製學生模式</button>
+                            <button class="open-new-tab-btn theme-button bg-orange-500 text-white py-1 px-2 rounded text-xs" data-url="${studentUrl}">新分頁開啟</button>
+                        </div>
+                    `;
+                    archiveListContainer.appendChild(itemEl);
+                });
+
+                document.querySelectorAll('.open-archive-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => loadArchive(e.target.dataset.id));
+                });
+                document.querySelectorAll('.delete-archive-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => deleteArchive(e.target.dataset.id));
+                });
+                
+                // 新增的按鈕事件處理
+                document.querySelectorAll('.copy-url-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        navigator.clipboard.writeText(e.target.dataset.url).then(() => {
+                            showAlert('網址已複製！');
+                        });
+                    });
+                });
+                
+                document.querySelectorAll('.copy-student-url-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        navigator.clipboard.writeText(e.target.dataset.url).then(() => {
+                            showAlert('學生模式網址已複製！');
+                        });
+                    });
+                });
+                
+                document.querySelectorAll('.open-new-tab-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        window.open(e.target.dataset.url, '_blank');
+                    });
+                });
+                
+                // 代碼編輯功能
+                document.querySelectorAll('.data-code-input').forEach(input => {
+                    input.addEventListener('blur', async (e) => {
+                        const newCode = e.target.value.trim().toUpperCase();
+                        const originalCode = e.target.dataset.original;
+                        const archiveId = e.target.dataset.id;
+                        
+                        if (newCode !== originalCode && newCode.length === 4) {
+                            try {
+                                // 檢查新代碼是否已存在
+                                if (await isCodeExists(newCode)) {
+                                    showAlert('此代碼已被使用，請選擇其他代碼！', '錯誤');
+                                    e.target.value = originalCode;
+                                    return;
+                                }
+                                
+                                // 更新資料庫
+                                await updateDoc(doc(db, "archives", archiveId), {
+                                    dataCode: newCode
+                                });
+                                
+                                e.target.dataset.original = newCode;
+                                showAlert('代碼已更新！');
+                            } catch (error) {
+                                console.error("更新代碼失敗:", error);
+                                showAlert('更新代碼失敗！', '錯誤');
+                                e.target.value = originalCode;
+                            }
+                        } else if (newCode.length !== 4) {
+                            showAlert('代碼必須為4位英數字！', '錯誤');
+                            e.target.value = originalCode;
+                        }
+                    });
+                    
+                    input.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter') {
+                            e.target.blur();
+                        }
+                    });
+                });
+            });
+        };
+
+        const loadArchive = (archiveId) => {
+            openModalEl.classList.add('hidden');
+            if (unsubscribeArchives) {
+                unsubscribeArchives();
+                unsubscribeArchives = null;
+            }
+            showConfirm('開啟舊檔將會覆蓋目前所有的噗文，確定要繼續嗎？', async () => {
+                showSyncStatus(true, false, '讀取存檔中...');
+                try {
+                    // 1. 清空目前的 sections
+                    const sectionsSnapshot = await getDocs(collection(db, "sections"));
+                    const deleteBatch = writeBatch(db);
+                    for (const sectionDoc of sectionsSnapshot.docs) {
+                        const postsSnapshot = await getDocs(collection(db, `sections/${sectionDoc.id}/posts`));
+                        postsSnapshot.forEach(postDoc => deleteBatch.delete(postDoc.ref));
+                        deleteBatch.delete(sectionDoc.ref);
+                    }
+                    await deleteBatch.commit();
+
+                    // 2. 讀取存檔資料
+                    const archiveDoc = await getDoc(doc(db, "archives", archiveId));
+                    if (!archiveDoc.exists()) {
+                        throw new Error("找不到該存檔！");
+                    }
+                    const archiveData = archiveDoc.data();
+
+                    // 3. 寫入新資料
+                    const addBatch = writeBatch(db);
+                    // 寫入設定
+                    const settingsRef = doc(db, "settings", "config");
+                    addBatch.set(settingsRef, {
+                        mainTitle: archiveData.title,
+                        backgroundUrl: archiveData.backgroundUrl
+                    });
+
+                    // 寫入噗文和回應
+                    for (const section of archiveData.sections) {
+                        // 處理可能缺少的欄位，避免寫入 undefined
+                        const sectionData = {
+                            title: section.title,
+                            createdAt: new Date(section.createdAt),
+                            type: section.type || 'text', // 預設為 'text'
+                            imageUrl: section.imageUrl || null
+                        };
+                        const sectionRef = doc(collection(db, "sections"));
+                        addBatch.set(sectionRef, sectionData);
+
+                        if (section.posts && section.posts.length > 0) {
+                            for (const post of section.posts) {
+                                // 處理可能缺少的欄位
+                                const postData = {
+                                    ...post,
+                                    createdAt: new Date(post.createdAt),
+                                    type: post.type || 'text', // 預設為 'text'
+                                    url: post.url || null
+                                };
+                                const postRef = doc(collection(db, `sections/${sectionRef.id}/posts`));
+                                addBatch.set(postRef, postData);
+                            }
+                        }
+                    }
+                    await addBatch.commit();
+                    
+                    showSyncStatus(false, false, '讀取成功！');
+                } catch (error) {
+                    console.error("讀取存檔失敗:", error);
+                    showAlert(`讀取存檔失敗！\n${error.message}`, "錯誤");
+                    showSyncStatus(false, true);
+                }
+            });
+        };
+
+        const deleteArchive = (archiveId) => {
+            openModalEl.classList.add('hidden');
+            if (unsubscribeArchives) {
+                unsubscribeArchives();
+                unsubscribeArchives = null;
+            }
+            showConfirm('確定要永久刪除這個存檔嗎？此操作無法復原。', async () => {
+                showSyncStatus(true, false, '刪除存檔中...');
+                try {
+                    await deleteDoc(doc(db, "archives", archiveId));
+                    showSyncStatus(false, false, '刪除成功！');
+                } catch (error) {
+                    console.error("刪除存檔失敗:", error);
+                    showAlert(`刪除存檔失敗！\n${error.message}`, "錯誤");
+                    showSyncStatus(false, true);
+                }
+            });
+        };
+
+        // --- 匯出與匯入功能 ---
+
+        const exportData = async () => {
+            if (!checkFirebase()) return;
+            const title = mainTitleInput.value.trim() || 'Plurk回應牆';
+            
+            try {
+                const settingsDoc = await getDoc(doc(db, "settings", "config"));
+                const backgroundUrl = (settingsDoc.exists() && settingsDoc.data().backgroundUrl) ? settingsDoc.data().backgroundUrl : '';
+
+                const serializableSections = sections.map(section => ({
+                    ...section,
+                    createdAt: section.createdAt?.toDate().toISOString() || new Date().toISOString(),
+                    posts: section.posts.map(post => ({
+                        ...post,
+                        createdAt: post.createdAt?.toDate().toISOString() || new Date().toISOString(),
+                    }))
+                }));
+
+                const exportData = {
+                    title: title,
+                    backgroundUrl: backgroundUrl,
+                    exportedAt: new Date().toISOString(),
+                    sections: serializableSections
+                };
+
+                const jsonStr = JSON.stringify(exportData, null, 2);
+                const blob = new Blob([jsonStr], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${title}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                showAlert(`資料已成功匯出為「${title}.json」`, '匯出成功');
+            } catch (error) {
+                console.error("匯出失敗:", error);
+                showAlert(`匯出失敗！\n${error.message}`, "錯誤");
+            }
+        };
+
+        // 下載HTML報告功能
+        const downloadHtml = () => {
+            const title = mainTitleInput.value.trim() || 'Plurk回應牆';
+            const timestamp = new Date().toLocaleString('zh-TW');
+            
+            // 創建HTML內容
+            let htmlContent = `
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${title} - 回應報告</title>
+    <style>
+        body {
+            font-family: "Microsoft JhengHei", "微軟正黑體", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .header h1 {
+            margin: 0 0 10px 0;
+            font-size: 2.5em;
+        }
+        .header .timestamp {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        .post-section {
+            background: white;
+            margin-bottom: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .post-header {
+            background: linear-gradient(135deg, #ffeaa7 0%, #fab1a0 100%);
+            padding: 20px;
+            border-bottom: 3px solid #fdcb6e;
+        }
+        .post-title {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #2d3436;
+            margin: 0;
+            word-wrap: break-word;
+        }
+        .post-image {
+            max-width: 300px;
+            height: auto;
+            border-radius: 8px;
+            margin-top: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        .responses-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .responses-table th {
+            background: linear-gradient(135deg, #74b9ff 0%, #0984e3 100%);
+            color: white;
+            padding: 15px 10px;
+            text-align: left;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        .responses-table td {
+            padding: 15px 10px;
+            border-bottom: 1px solid #ddd;
+            vertical-align: top;
+            word-wrap: break-word;
+        }
+        .responses-table tr:nth-child(even) {
+            background-color: #f8f9ff;
+        }
+        .responses-table tr:hover {
+            background-color: #e8f4f8;
+        }
+        .response-name {
+            font-weight: bold;
+            color: #2d3436;
+            font-size: 1.1em;
+        }
+        .response-content {
+            line-height: 1.6;
+            white-space: pre-wrap;
+            color: #636e72;
+        }
+        .response-media img {
+            max-width: 200px;
+            height: auto;
+            border-radius: 5px;
+            margin-top: 5px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+        .response-media iframe {
+            width: 280px;
+            height: 158px;
+            border: none;
+            border-radius: 5px;
+            margin-top: 5px;
+        }
+        .response-media a {
+            color: #0984e3;
+            text-decoration: none;
+            padding: 5px 10px;
+            background: #e8f4f8;
+            border-radius: 5px;
+            display: inline-block;
+            margin-top: 5px;
+            word-break: break-all;
+        }
+        .response-media a:hover {
+            background: #d1ecf1;
+        }
+        .no-responses {
+            text-align: center;
+            padding: 40px;
+            color: #636e72;
+            font-style: italic;
+            background: #f8f9fa;
+        }
+        .stats {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .stats h3 {
+            margin-top: 0;
+            color: #2d3436;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        .stat-item {
+            background: linear-gradient(135deg, #fd79a8 0%, #fdcb6e 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            display: block;
+        }
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        
+        /* --- MODIFICATION START: 圖片放大檢視器樣式 --- */
+        .image-modal {
+            display: none; /* 預設隱藏 */
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.85);
+            -webkit-backdrop-filter: blur(5px);
+            backdrop-filter: blur(5px);
+            animation: fadeIn 0.3s;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .modal-content-image {
+            margin: auto;
+            display: block;
+            max-width: 90%;
+            max-height: 90%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border-radius: 8px;
+            animation: zoomIn 0.3s;
+        }
+        @keyframes zoomIn {
+            from { transform: translate(-50%, -50%) scale(0.5); }
+            to { transform: translate(-50%, -50%) scale(1); }
+        }
+        .close-modal {
+            position: absolute;
+            top: 20px;
+            right: 35px;
+            color: #f1f1f1;
+            font-size: 40px;
+            font-weight: bold;
+            transition: 0.3s;
+            cursor: pointer;
+        }
+        .close-modal:hover,
+        .close-modal:focus {
+            color: #bbb;
+            text-decoration: none;
+        }
+        .zoomable-image {
+            cursor: zoom-in;
+            transition: transform 0.2s ease-in-out;
+        }
+        .zoomable-image:hover {
+            transform: scale(1.03);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        /* --- MODIFICATION END --- */
+    /* --- MODIFICATION END --- */
+    </style>
+</head>
+<body>
+    <div style="position: fixed; bottom: 10px; right: 10px; background-color: rgba(0, 0, 0, 0.7); color: white; padding: 8px 12px; border-radius: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); font-size: 14px; font-family: 'Noto Sans TC', sans-serif; z-index: 1001;">
+        Made by <strong>阿剛老師</strong>
+    </div>
+    <div class="header">
+        <h1>${title}</h1>
+        <div class="timestamp">匯出時間：${timestamp}</div>
+    </div>
+`;
+`;
+`;
+
+            // 統計資料
+            const totalPosts = sections.length;
+            let totalResponses = 0;
+            sections.forEach(section => {
+                if (section.posts) {
+                    totalResponses += section.posts.length;
+                }
+            });
+
+            htmlContent += `
+    <div class="stats">
+        <h3>📊 統計資料</h3>
+        <div class="stats-grid">
+            <div class="stat-item">
+                <span class="stat-number">${totalPosts}</span>
+                <span class="stat-label">總噗文數</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-number">${totalResponses}</span>
+                <span class="stat-label">總回應數</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-number">${totalPosts > 0 ? (totalResponses / totalPosts).toFixed(1) : 0}</span>
+                <span class="stat-label">平均回應數</span>
+            </div>
+        </div>
+    </div>
+`;
+
+            // 遍歷每個噗文
+            sections.forEach((section, sectionIndex) => {
+                htmlContent += `
+    <div class="post-section">
+        <div class="post-header">
+            <div class="post-title">${section.title || `噗文 ${sectionIndex + 1}`}</div>`;
+
+                // 如果有圖片，加入圖片
+                if (section.imageUrl) {
+                    // --- MODIFICATION: 加入 zoomable-image class ---
+                    htmlContent += `
+            <img src="${section.imageUrl}" alt="噗文圖片" class="post-image zoomable-image">`;
+                }
+
+                htmlContent += `
+        </div>`;
+
+                // 回應表格
+                if (section.posts && section.posts.length > 0) {
+                    htmlContent += `
+        <table class="responses-table">
+            <thead>
+                <tr>
+                    <th style="width: 15%;">回應者</th>
+                    <th style="width: 45%;">內容</th>
+                    <th style="width: 40%;">媒體/連結</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+                    section.posts.forEach(post => {
+                        let mediaHtml = '';
+                        
+                        // 處理不同類型的媒體
+                        switch (post.type) {
+                            case 'image_url':
+                            case 'image_upload':
+                            case 'drawing':
+                                // --- MODIFICATION: 加入 zoomable-image class ---
+                                mediaHtml = `<div class="response-media"><img src="${post.url}" alt="回應圖片" class="zoomable-image"></div>`;
+                                break;
+                            case 'youtube':
+                                const embedUrl = getYoutubeEmbedUrl(post.url);
+                                if (embedUrl) {
+                                    mediaHtml = `<div class="response-media"><iframe src="${embedUrl}" allowfullscreen></iframe></div>`;
+                                }
+                                break;
+                            case 'link':
+                                mediaHtml = `<div class="response-media"><a href="${post.url}" target="_blank">${post.url}</a></div>`;
+                                break;
+                        }
+
+                        htmlContent += `
+                <tr>
+                    <td><div class="response-name">${post.title || '匿名'}</div></td>
+                    <td><div class="response-content">${post.content || ''}</div></td>
+                    <td>${mediaHtml}</td>
+                </tr>`;
+                    });
+
+                    htmlContent += `
+            </tbody>
+        </table>`;
+                } else {
+                    htmlContent += `
+        <div class="no-responses">目前沒有回應</div>`;
+                }
+
+                htmlContent += `
+    </div>`;
+            });
+
+            // --- MODIFICATION START: 加入 modal 的 HTML 和 script ---
+            htmlContent += `
+    <!-- 圖片放大檢視器 -->
+    <div id="myModal" class="image-modal">
+        <span class="close-modal">&times;</span>
+        <img class="modal-content-image" id="img01">
+    </div>
+
+    <script>
+        // 取得 modal
+        var modal = document.getElementById('myModal');
+        var modalImg = document.getElementById("img01");
+        
+        // 取得所有可放大的圖片
+        var images = document.querySelectorAll('.zoomable-image');
+        images.forEach(function(img) {
+            img.onclick = function(){
+                modal.style.display = "block";
+                modalImg.src = this.src;
+            }
+        });
+
+        // 取得關閉按鈕
+        var span = document.getElementsByClassName("close-modal")[0];
+
+        // 點擊 <span> (x) 關閉 modal
+        if (span) {
+            span.onclick = function() { 
+                modal.style.display = "none";
+            }
+        }
+        
+        // 點擊 modal 背景關閉
+        modal.onclick = function(event) {
+            // 確保點擊的是背景而不是圖片本身
+            if (event.target == modal) {
+                modal.style.display = "none";
+            }
+        }
+    <\/script>
+`;
+            // --- MODIFICATION END ---
+
+            htmlContent += `
+</body>
+</html>`;
+
+            // 下載HTML檔案
+            const blob = new Blob([htmlContent], { type: 'text/html; charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${title}_回應報告_${new Date().toISOString().split('T')[0]}.html`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showAlert(`HTML報告已成功下載為「${title}_回應報告_${new Date().toISOString().split('T')[0]}.html」`, '下載成功');
+        };
+
+        const handleFileImport = (file) => {
+            if (!file) return;
+            
+            if (!file.name.endsWith('.json')) {
+                showAlert('請選擇 JSON 格式的檔案！');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    
+                    // 驗證資料格式
+                    if (!data.title || !Array.isArray(data.sections)) {
+                        throw new Error('檔案格式不正確！缺少必要的 title 或 sections 欄位。');
+                    }
+
+                    importData = data;
+                    importModal.classList.add('hidden');
+                    showConfirm(`即將匯入「${data.title}」的資料，包含 ${data.sections.length} 則噗文。這將覆蓋目前所有的噗文和設定，確定要繼續嗎？`, executeImport);
+                } catch (error) {
+                    console.error("解析檔案失敗:", error);
+                    showAlert(`無法解析檔案！請確認這是一個有效的 JSON 檔案。\n錯誤：${error.message}`, "檔案格式錯誤");
+                }
+            };
+            reader.readAsText(file);
+        };
+
+        const executeImport = async () => {
+            if (!importData || !checkFirebase()) {
+                showAlert('沒有可匯入的資料，請先選擇檔案！');
+                return;
+            }
+            
+            // 先保存 importData 的副本，避免在執行過程中被清空
+            const dataToImport = JSON.parse(JSON.stringify(importData));
+            
+            // 額外檢查資料完整性
+            if (!dataToImport.title || !Array.isArray(dataToImport.sections)) {
+                showAlert('匯入資料格式不正確！', '錯誤');
+                return;
+            }
+            
+            showSyncStatus(true, false, '匯入資料中...');
+            try {
+                    // 1. 清空目前的 sections
+                    const sectionsSnapshot = await getDocs(collection(db, "sections"));
+                    const deleteBatch = writeBatch(db);
+                    for (const sectionDoc of sectionsSnapshot.docs) {
+                        const postsSnapshot = await getDocs(collection(db, `sections/${sectionDoc.id}/posts`));
+                        postsSnapshot.forEach(postDoc => deleteBatch.delete(postDoc.ref));
+                        deleteBatch.delete(sectionDoc.ref);
+                    }
+                    await deleteBatch.commit();
+
+                    // 2. 匯入新資料
+                    const addBatch = writeBatch(db);
+                    
+                    // 更新設定
+                    const settingsRef = doc(db, "settings", "config");
+                    addBatch.set(settingsRef, {
+                        mainTitle: dataToImport.title,
+                        backgroundUrl: dataToImport.backgroundUrl || ''
+                    });
+
+                    // 匯入噗文和回應
+                    for (const section of dataToImport.sections) {
+                        const sectionRef = doc(collection(db, "sections"));
+                        // 修復: 確保 section.type 和 section.imageUrl 有預設值
+                        const sectionData = {
+                            title: section.title,
+                            createdAt: new Date(section.createdAt),
+                            type: section.type || 'text',
+                            imageUrl: section.imageUrl || null
+                        };
+                        addBatch.set(sectionRef, sectionData);
+
+                        if (section.posts && section.posts.length > 0) {
+                            for (const post of section.posts) {
+                                const postRef = doc(collection(db, `sections/${sectionRef.id}/posts`));
+                                // 修復: 確保 post.type 和 post.url 有預設值
+                                const postData = {
+                                    ...post,
+                                    createdAt: new Date(post.createdAt),
+                                    type: post.type || 'text',
+                                    url: post.url || null
+                                };
+                                addBatch.set(postRef, postData);
+                            }
+                        }
+                    }
+                    
+                    await addBatch.commit();
+                
+                showSyncStatus(false, false, '匯入成功！');
+                importData = null;
+                showAlert('資料匯入完成！');
+            } catch (error) {
+                console.error("匯入失敗:", error);
+                showAlert(`匯入失敗！\n${error.message}`, "錯誤");
+                showSyncStatus(false, true);
+            }
+        };
+        
+        // 其他輔助函式
+        const handleTypeChange = (e) => {
+            const type = e.target.value;
+            const urlContainer = document.getElementById('url-input-container');
+            const uploadContainer = document.getElementById('upload-container');
+            const urlLabel = document.getElementById('url-label');
+            urlContainer.classList.add('hidden');
+            uploadContainer.classList.add('hidden');
+            switch (type) {
+                case 'image_url': urlContainer.classList.remove('hidden'); urlLabel.textContent = '圖片網址'; break;
+                case 'youtube': urlContainer.classList.remove('hidden'); urlLabel.textContent = 'YouTube 網址'; break;
+                case 'link': urlContainer.classList.remove('hidden'); urlLabel.textContent = '網址'; break;
+                case 'image_upload': uploadContainer.classList.remove('hidden'); break;
+                case 'drawing': break;
+            }
+            // 呼叫塗鴉處理函數
+            handleDrawingTypeChange(e);
+        };
+
+        const handleImageUpload = (file, type) => {
+            if (!file) return;
+            if (!file.type.startsWith('image/')) {
+                showAlert('請選擇圖片檔案'); return;
+            }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    const maxWidth = type === 'background' ? 1920 : 800;
+                    const scale = Math.min(1, maxWidth / img.width);
+                    canvas.width = img.width * scale;
+                    canvas.height = img.height * scale;
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+                    if (dataUrl.length > 900000) { 
+                        showAlert('警告：圖片檔案過大，即使壓縮後仍可能超過資料庫限制，建議您選取更小的圖片，否則可能儲存失敗。', '檔案過大');
+                    }
+
+                    if (type === 'background') {
+                        uploadedBgImageData = dataUrl;
+                        document.getElementById('bg-upload-filename').textContent = `已選擇: ${file.name}`;
+                    } else if (type === 'response') {
+                        uploadedImageData = dataUrl;
+                        document.getElementById('upload-filename').textContent = `已選擇: ${file.name}`;
+                    } else if (type === 'new-plurk') {
+                        newPlurkUploadedImage = dataUrl;
+                    }
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        };
+        
+        const handleDragEvents = (e) => {
+            e.preventDefault(); e.stopPropagation();
+            if (e.type === 'dragenter' || e.type === 'dragover') {
+                e.currentTarget.classList.add('bg-gray-100');
+            } else if (e.type === 'dragleave') {
+                e.currentTarget.classList.remove('bg-gray-100');
+            }
+        };
+
+        const handleImageDrop = (e) => {
+            e.preventDefault();
+            e.currentTarget.classList.remove('bg-gray-100');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleImageUpload(files[0], 'response');
+            }
+        };
+
+        const autoResizeTextarea = (e) => {
+            const textarea = e.target;
+            textarea.style.height = 'auto';
+            textarea.style.height = textarea.scrollHeight + 'px';
+        };
+
+        const getYoutubeEmbedUrl = (url) => {
+            if (!url) return '';
+            const regExp = /^.*(youtu.be\/|v\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+            const match = url.match(regExp);
+            if (match && match[2].length === 11) {
+                return `https://www.youtube.com/embed/${match[2]}`;
+            }
+            return '';
+        };
+
+        const restoreDefaultBackground = async () => {
+            if (!checkFirebase()) return;
+
+            settingBgModal.classList.add('hidden');
+            uploadedBgImageData = null;
+            document.getElementById('bg-upload-filename').textContent = '';
+            
+            showConfirm('確定要將河道背景恢復為預設圖片嗎？', async () => {
+                showSyncStatus(true, false, '恢復預設背景中...');
+                try {
+                    const defaultBgUrl = 'https://images.plurk.com/6rYRzJbEIqWyR8wei5we.jpg';
+                    await setDoc(doc(db, "settings", "config"), { backgroundUrl: defaultBgUrl }, { merge: true });
+                    showSyncStatus(false, false, '背景已恢復！');
+                } catch (error) {
+                    console.error("恢復預設背景失敗:", error);
+                    showAlert(`恢復預設背景失敗！\n${error.message}`, "錯誤");
+                    showSyncStatus(false, true);
+                }
+            });
+        };
+
+        // 設置塗鴉相關事件監聽
+        const setupDrawingEventListeners = () => {
+            closeDrawingBtn.addEventListener('click', () => closeDrawingModal(true));
+            drawingModal.addEventListener('click', (e) => {
+                if (e.target === drawingModal) closeDrawingModal(true);
+            });
+            
+            brushTool.addEventListener('click', () => setTool('brush'));
+            eraserTool.addEventListener('click', () => setTool('eraser'));
+            
+            brushSize.addEventListener('input', (e) => {
+                currentBrushSize = e.target.value;
+                brushSizeDisplay.textContent = currentBrushSize;
+            });
+            
+            colorBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    currentColor = btn.dataset.color;
+                    colorBtns.forEach(b => b.classList.remove('ring-4', 'ring-blue-500'));
+                    btn.classList.add('ring-4', 'ring-blue-500');
+                });
+            });
+            
+            uploadBgBtn.addEventListener('click', () => drawingBgUpload.click());
+            drawingBgUpload.addEventListener('change', (e) => {
+                if (e.target.files[0]) {
+                    loadDrawingBackground(e.target.files[0]);
+                }
+            });
+            
+            clearCanvasBtn.addEventListener('click', clearDrawingCanvas);
+            saveDrawingBtn.addEventListener('click', saveDrawing);
+            
+            // 設置畫布事件
+            setupCanvasEvents();
+            
+            // 預設選擇黑色
+            document.querySelector('.color-btn[data-color="#000000"]').click();
+        };
+        
+        // 設置畫布事件
+        const setupCanvasEvents = () => {
+            // 滑鼠事件
+            drawingCanvas.addEventListener('mousedown', startDrawing);
+            drawingCanvas.addEventListener('mousemove', draw);
+            drawingCanvas.addEventListener('mouseup', stopDrawing);
+            drawingCanvas.addEventListener('mouseout', stopDrawing);
+            
+            // 觸控事件 (iPad 支援)
+            drawingCanvas.addEventListener('touchstart', handleTouch);
+            drawingCanvas.addEventListener('touchmove', handleTouch);
+            drawingCanvas.addEventListener('touchend', stopDrawing);
+            drawingCanvas.addEventListener('touchcancel', stopDrawing);
+        };
+        
+        // 開啟塗鴉模態框
+        const openDrawingModal = () => {
+            drawingModal.classList.remove('hidden');
+            
+            // 重置按鈕文字
+            const drawingBtn = document.querySelector('.drawing-open-btn');
+            if (drawingBtn && drawingBtn.textContent.includes('(已儲存)')) {
+                drawingBtn.textContent = '開啟塗鴉畫板';
+            }
+            
+            // 等待 DOM 更新後初始化 canvas
+            setTimeout(() => {
+                initDrawingCanvas();
+                loadOriginalPostImages();
+            }, 100);
+        };
+        
+        // 關閉塗鴉模態框
+        const closeDrawingModal = (clearData = false) => {
+            drawingModal.classList.add('hidden');
+            if (clearData) {
+                drawingData = null;
+            }
+        };
+        
+        // 初始化畫布
+        const initDrawingCanvas = () => {
+            const container = drawingCanvas.parentElement;
+            const rect = container.getBoundingClientRect();
+            
+            // 設置 canvas 大小
+            drawingCanvas.width = rect.width;
+            drawingCanvas.height = rect.height;
+            drawingBgCanvas.width = rect.width;
+            drawingBgCanvas.height = rect.height;
+            
+            drawingCtx = drawingCanvas.getContext('2d');
+            drawingBgCtx = drawingBgCanvas.getContext('2d');
+            
+            // 設置繪圖屬性
+            drawingCtx.lineCap = 'round';
+            drawingCtx.lineJoin = 'round';
+            
+            // 將背景畫布預設為白色
+            drawingBgCtx.fillStyle = '#FFFFFF';
+            drawingBgCtx.fillRect(0, 0, drawingBgCanvas.width, drawingBgCanvas.height);
+        };
+        
+        // 加載原始噗文圖片作為背景
+        const loadOriginalPostImages = () => {
+            if (originalPostImages.length > 0) {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = () => {
+                    drawingBgCtx.clearRect(0, 0, drawingBgCanvas.width, drawingBgCanvas.height);
+                    
+                    // 計算縮放比例以適應 canvas
+                    const scale = Math.min(
+                        drawingBgCanvas.width / img.width,
+                        drawingBgCanvas.height / img.height
+                    );
+                    const newWidth = img.width * scale;
+                    const newHeight = img.height * scale;
+                    const x = (drawingBgCanvas.width - newWidth) / 2;
+                    const y = (drawingBgCanvas.height - newHeight) / 2;
+                    
+                    drawingBgCtx.drawImage(img, x, y, newWidth, newHeight);
+                };
+                img.src = originalPostImages[0]; // 使用第一張圖片
+            }
+        };
+        
+        // 加載自定義背景圖片
+        const loadDrawingBackground = (file) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    drawingBgCtx.clearRect(0, 0, drawingBgCanvas.width, drawingBgCanvas.height);
+                    
+                    const scale = Math.min(
+                        drawingBgCanvas.width / img.width,
+                        drawingBgCanvas.height / img.height
+                    );
+                    const newWidth = img.width * scale;
+                    const newHeight = img.height * scale;
+                    const x = (drawingBgCanvas.width - newWidth) / 2;
+                    const y = (drawingBgCanvas.height - newHeight) / 2;
+                    
+                    drawingBgCtx.drawImage(img, x, y, newWidth, newHeight);
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        };
+        
+        // 設置工具
+        const setTool = (tool) => {
+            currentTool = tool;
+            document.querySelectorAll('.tool-btn').forEach(btn => {
+                btn.classList.remove('bg-blue-500', 'text-white');
+                btn.classList.add('bg-gray-500');
+            });
+            
+            if (tool === 'brush') {
+                brushTool.classList.remove('bg-gray-500');
+                brushTool.classList.add('bg-blue-500', 'text-white');
+                drawingCanvas.style.cursor = 'crosshair';
+            } else if (tool === 'eraser') {
+                eraserTool.classList.remove('bg-gray-500');
+                eraserTool.classList.add('bg-blue-500', 'text-white');
+                drawingCanvas.style.cursor = 'grab';
+            }
+        };
+        
+        // 開始繪圖
+        const startDrawing = (e) => {
+            isDrawing = true;
+            const rect = drawingCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            drawingCtx.beginPath();
+            drawingCtx.moveTo(x, y);
+        };
+        
+        // 繪圖
+        const draw = (e) => {
+            if (!isDrawing) return;
+            
+            const rect = drawingCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            drawingCtx.lineWidth = currentBrushSize;
+            
+            if (currentTool === 'brush') {
+                drawingCtx.globalCompositeOperation = 'source-over';
+                drawingCtx.strokeStyle = currentColor;
+            } else if (currentTool === 'eraser') {
+                drawingCtx.globalCompositeOperation = 'destination-out';
+            }
+            
+            drawingCtx.lineTo(x, y);
+            drawingCtx.stroke();
+        };
+        
+        // 停止繪圖
+        const stopDrawing = () => {
+            isDrawing = false;
+            drawingCtx.beginPath();
+        };
+        
+        // 處理觸控事件
+        const handleTouch = (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            if (!touch) return;
+            
+            const rect = drawingCanvas.getBoundingClientRect();
+            const mouseEvent = new MouseEvent(e.type === 'touchstart' ? 'mousedown' : 
+                e.type === 'touchmove' ? 'mousemove' : 'mouseup', {
+                clientX: touch.clientX,
+                clientY: touch.clientY
+            });
+            
+            drawingCanvas.dispatchEvent(mouseEvent);
+        };
+        
+        // 清空畫布
+        const clearDrawingCanvas = () => {
+            drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+        };
+        
+        // 儲存塗鴉
+        const saveDrawing = () => {
+            // 創建一個新的 canvas 來合併背景和繪圖
+            const mergedCanvas = document.createElement('canvas');
+            mergedCanvas.width = drawingCanvas.width;
+            mergedCanvas.height = drawingCanvas.height;
+            const mergedCtx = mergedCanvas.getContext('2d');
+            
+            // 新增：先將畫布背景設為白色
+            mergedCtx.fillStyle = '#FFFFFF';
+            mergedCtx.fillRect(0, 0, mergedCanvas.width, mergedCanvas.height);
+
+            // 先繪背景
+            mergedCtx.drawImage(drawingBgCanvas, 0, 0);
+            // 再繪塗鴉內容
+            mergedCtx.drawImage(drawingCanvas, 0, 0);
+            
+            // 壓縮圖片並轉換為 base64 (與上傳圖片相同的壓縮邏輯)
+            const maxWidth = 800;
+            const scale = Math.min(1, maxWidth / mergedCanvas.width);
+            
+            // 創建壓縮後的 canvas
+            const compressedCanvas = document.createElement('canvas');
+            compressedCanvas.width = mergedCanvas.width * scale;
+            compressedCanvas.height = mergedCanvas.height * scale;
+            const compressedCtx = compressedCanvas.getContext('2d');
+            
+            // 繪製壓縮後的圖片
+            compressedCtx.drawImage(mergedCanvas, 0, 0, compressedCanvas.width, compressedCanvas.height);
+            
+            // 轉換為 base64 並壓縮品質
+            drawingData = compressedCanvas.toDataURL('image/jpeg', 0.85);
+            
+            // 檢查檔案大小
+            if (drawingData.length > 900000) { 
+                showAlert('警告：塗鴉檔案過大，即使壓縮後仍可能超過資料庫限制，可能儲存失敗。', '檔案過大');
+            }
+            
+            // 更新按鈕文字顯示已儲存狀態
+            const drawingBtn = document.querySelector('.drawing-open-btn');
+            if (drawingBtn) {
+                drawingBtn.textContent = '開啟塗鴉畫板 (已儲存)';
+            }
+            
+            // 關閉塗鴉視窗，但不清空資料
+            closeDrawingModal(false);
+        };
+        
+        // 開啟回應展開模態框
+        const openResponsesModal = (sectionEl) => {
+            const responsesModal = document.getElementById('responses-modal');
+            const responsesContainer = document.getElementById('responses-container');
+            
+            // 清空容器
+            responsesContainer.innerHTML = '';
+            
+            // 取得原始噗文資料
+            const originalTitle = sectionEl.querySelector('.section-title-input');
+            const originalImage = sectionEl.querySelector('.section-image img');
+            
+            // 創建原始噗文區塊
+            const originalSection = document.createElement('div');
+            originalSection.className = 'col-span-full bg-gradient-to-r from-orange-100 to-yellow-100 border border-orange-200 p-4 rounded-lg mb-4 shadow-sm';
+            
+            const titleHeader = document.createElement('h3');
+            titleHeader.className = 'text-lg font-bold mb-2 text-orange-800';
+            titleHeader.textContent = '原始噗文';
+            originalSection.appendChild(titleHeader);
+            
+            // 複製原始噗文內容
+            if (originalTitle && originalTitle.value.trim()) {
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'text-gray-800 mb-2 preserve-lines font-medium';
+                contentDiv.textContent = originalTitle.value;
+                originalSection.appendChild(contentDiv);
+            }
+            
+            // 複製原始噗文圖片
+            if (originalImage) {
+                const imgClone = originalImage.cloneNode(true);
+                imgClone.className = 'max-w-full h-auto rounded-lg mt-2';
+                originalSection.appendChild(imgClone);
+            }
+            
+            responsesContainer.appendChild(originalSection);
+            
+            // 取得所有回應 (post-card elements)
+            const responses = sectionEl.querySelectorAll('.post-card');
+            
+            if (responses.length === 0) {
+                const noResponsesMsg = document.createElement('div');
+                noResponsesMsg.className = 'col-span-full text-center text-gray-500 py-8 bg-gray-50 rounded-lg border border-gray-200';
+                noResponsesMsg.textContent = '目前沒有回應';
+                responsesContainer.appendChild(noResponsesMsg);
+            } else {
+                // 為每個回應創建卡片
+                responses.forEach((response, index) => {
+                    const responseCard = document.createElement('div');
+                    responseCard.className = 'bg-gradient-to-br from-white to-blue-50 border border-blue-200 rounded-lg p-4 shadow-sm hover:shadow-lg hover:from-blue-50 hover:to-blue-100 transition-all duration-200';
+                    
+                    // 取得回應的姓名 (從 h3 元素)
+                    const nameElement = response.querySelector('h3');
+                    const name = nameElement ? nameElement.textContent : `回應者 ${index + 1}`;
+                    
+                    // 回應者姓名
+                    const nameHeader = document.createElement('div');
+                    nameHeader.className = 'text-sm font-bold text-orange-700 mb-2 flex items-center';
+                    
+                    // 取得頭像字母
+                    const avatarElement = response.querySelector('.reply-avatar');
+                    if (avatarElement) {
+                        const avatarSpan = document.createElement('span');
+                        avatarSpan.className = 'inline-flex items-center justify-center w-7 h-7 bg-gradient-to-r from-orange-500 to-pink-500 text-white rounded-full text-xs font-bold mr-2 shadow-sm';
+                        avatarSpan.textContent = avatarElement.textContent;
+                        nameHeader.appendChild(avatarSpan);
+                    }
+                    
+                    const nameSpan = document.createElement('span');
+                    nameSpan.textContent = name;
+                    nameHeader.appendChild(nameSpan);
+                    responseCard.appendChild(nameHeader);
+                    
+                    // 回應內容
+                    const contentElement = response.querySelector('.text-sm.text-gray-700.preserve-lines');
+                    if (contentElement && contentElement.textContent.trim()) {
+                        const contentDiv = document.createElement('div');
+                        contentDiv.className = 'text-gray-800 mb-3 preserve-lines leading-relaxed';
+                        contentDiv.textContent = contentElement.textContent;
+                        responseCard.appendChild(contentDiv);
+                    }
+                    
+                    // 回應媒體 (圖片、影片、連結)
+                    const mediaImage = response.querySelector('img.viewable-image');
+                    const mediaIframe = response.querySelector('iframe');
+                    const mediaLink = response.querySelector('a[target="_blank"]');
+                    
+                    if (mediaImage) {
+                        const imgClone = mediaImage.cloneNode(true);
+                        imgClone.className = 'max-w-full h-auto rounded-lg mt-2 cursor-pointer';
+                        imgClone.addEventListener('click', () => {
+                            imageViewer.querySelector('.image-content').src = imgClone.src;
+                            imageViewer.classList.remove('hidden');
+                        });
+                        responseCard.appendChild(imgClone);
+                    } else if (mediaIframe) {
+                        const iframeContainer = document.createElement('div');
+                        iframeContainer.className = 'mt-2 border border-orange-200 rounded-md overflow-hidden shadow-sm';
+                        iframeContainer.style.width = '100%';
+                        iframeContainer.style.height = '360px'; // 2倍高度 (原本約180px)
+                        const iframeClone = mediaIframe.cloneNode(true);
+                        iframeClone.className = 'w-full h-full';
+                        iframeContainer.appendChild(iframeClone);
+                        responseCard.appendChild(iframeContainer);
+                    } else if (mediaLink) {
+                        const linkClone = mediaLink.cloneNode(true);
+                        linkClone.className = 'block mt-2 p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200 text-blue-700 hover:text-blue-800 hover:from-blue-100 hover:to-indigo-100 transition-all break-all text-sm font-medium shadow-sm';
+                        responseCard.appendChild(linkClone);
+                    }
+                    
+                    // 讚數顯示
+                    const likesElement = response.querySelector('.font-bold.text-sm.mr-1');
+                    if (likesElement && likesElement.textContent !== '0') {
+                        const likesDiv = document.createElement('div');
+                        likesDiv.className = 'text-xs text-orange-600 mt-3 flex items-center bg-orange-50 px-2 py-1 rounded-full border border-orange-200 w-fit';
+                        likesDiv.innerHTML = `❤️ ${likesElement.textContent} 個讚`;
+                        responseCard.appendChild(likesDiv);
+                    }
+                    
+                    responsesContainer.appendChild(responseCard);
+                });
+            }
+            
+            // 顯示模態框
+            responsesModal.classList.remove('hidden');
+        };
+        
+        // 關閉回應展開模態框
+        const closeResponsesModal = () => {
+            const responsesModal = document.getElementById('responses-modal');
+            responsesModal.classList.add('hidden');
+        };
+        
+        // 擴展類型變更處理器以支援塗鴉
+        const handleDrawingTypeChange = (e) => {
+            if (e.target.value === 'drawing') {
+                // 顯示開啟塗鴉按鈕
+                const drawingBtn = document.createElement('button');
+                drawingBtn.type = 'button';
+                drawingBtn.textContent = '開啟塗鴉畫板';
+                drawingBtn.className = 'theme-button bg-purple-500 hover:bg-purple-600 text-white py-2 px-4 rounded-lg mt-2 w-full';
+                drawingBtn.addEventListener('click', openDrawingModal);
+                
+                const existingBtn = document.querySelector('.drawing-open-btn');
+                if (existingBtn) existingBtn.remove();
+                
+                drawingBtn.classList.add('drawing-open-btn');
+                e.target.closest('.mt-4').appendChild(drawingBtn);
+            } else {
+                const existingBtn = document.querySelector('.drawing-open-btn');
+                if (existingBtn) existingBtn.remove();
+            }
+        };
+        
+        // 啟動應用程式
+        init();
+    </script>
+</body>
+</html>
